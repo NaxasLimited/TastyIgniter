@@ -25,9 +25,25 @@ final class PosPayments extends AdminPageController
 
     public function page(string $orderId): Response
     {
-        $order = $this->order($orderId);
+        $order = $this->order($orderId)->load('items');
+        $staff = $this->user();
+        $tokenItems = $order->items
+            ->whereNotIn('status', ['removed', 'voided'])
+            ->values()
+            ->map(fn ($item) => [
+                'name' => $item->configuration_payload['menu_name'] ?? 'Menu item',
+                'variant' => $item->configuration_payload['variant']['name'] ?? null,
+                'note' => $item->item_note,
+                'quantity' => $item->quantity,
+            ]);
+        $tokenMeta = [
+            'restaurant' => config('restaurant-ops.payment.receipt.restaurant_name', 'Ottoman Express'),
+            'order' => $order->getKey(),
+            'service' => str($order->service_type)->replace('_', ' ')->title()->toString(),
+            'cashier' => $staff->name ?? $staff->username ?? 'Staff',
+        ];
 
-        return response($this->renderAdminPage('Naxas.RestaurantOps::payments.payment', ['order' => $order, 'providers' => config('restaurant-ops.payment.mobile_providers', [])], "Payment #{$order->getKey()}", 'restaurant-ops-pos'));
+        return response($this->renderAdminPage('Naxas.RestaurantOps::payments.payment', ['order' => $order, 'providers' => config('restaurant-ops.payment.mobile_providers', []), 'tokenItems' => $tokenItems, 'tokenMeta' => $tokenMeta], "Payment #{$order->getKey()}", 'restaurant-ops-pos'));
     }
 
     public function prepare(string $orderId): Response

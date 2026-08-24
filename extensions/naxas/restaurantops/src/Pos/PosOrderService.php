@@ -10,6 +10,7 @@ use Igniter\Cart\Models\OrderMenuOptionValue;
 use Igniter\Cart\Models\OrderTotal;
 use Igniter\User\Models\Address;
 use Igniter\User\Models\Customer;
+use Igniter\User\Models\User;
 use Illuminate\Support\Facades\DB;
 use Naxas\RestaurantOps\Contracts\AuditLogger;
 use Naxas\RestaurantOps\Contracts\LocationContextContract;
@@ -20,11 +21,15 @@ use Naxas\RestaurantOps\Models\PosIdempotencyKey;
 use Naxas\RestaurantOps\Models\PosOrder;
 use Naxas\RestaurantOps\Models\PosOrderEvent;
 use Naxas\RestaurantOps\Models\PosOrderItem;
+use Naxas\RestaurantOps\Models\RestaurantTable;
+use Naxas\RestaurantOps\Models\TableSession;
 use Naxas\RestaurantOps\Pos\Contracts\PosOrderServiceContract;
 use Naxas\RestaurantOps\Pos\Events\PosOrderReadyForKitchen;
 use Naxas\RestaurantOps\Pos\Exceptions\PosException;
 use Naxas\RestaurantOps\Shifts\Contracts\ShiftContextContract;
 use Naxas\RestaurantOps\Shifts\ShiftStatus;
+use Naxas\RestaurantOps\Tables\TableSessionStatus;
+use Naxas\RestaurantOps\Tables\TableStatus;
 
 final class PosOrderService implements PosOrderServiceContract
 {
@@ -40,6 +45,7 @@ final class PosOrderService implements PosOrderServiceContract
         }
         $service = $this->service((string) ($data['service_type'] ?? ''));
         $this->validateCustomer($service, $data);
+        $this->validateDineInInput($service, $data);
         $hash = $this->hash($data);
         if ($existing = $this->replay($actorId, 'create', $idempotencyKey, $hash)) {
             return PosOrder::findOrFail($existing);
@@ -49,12 +55,15 @@ final class PosOrderService implements PosOrderServiceContract
             $order = PosOrder::create([
                 'location_id' => $location->getKey(), 'shift_id' => $shift->getKey(), 'cashier_id' => $actorId,
                 'service_type' => $service, 'source' => 'pos', 'status' => PosOrderStatus::DRAFT,
+                'waiter_id' => $data['waiter_id'] ?? null,
                 'customer_id' => $data['customer_id'] ?? null, 'guest_name' => $data['guest_name'] ?? null,
                 'guest_phone' => $data['guest_phone'] ?? null, 'guest_email' => $data['guest_email'] ?? null,
                 'delivery_address_snapshot' => $service === 'delivery' ? ($data['delivery_address'] ?? null) : null,
                 'requested_time' => $data['requested_time'] ?? null, 'guest_count' => $data['guest_count'] ?? null,
                 'order_note' => $data['order_note'] ?? null,
             ]);
+            $this->syncTableSession($order, $data['table_id'] ?? null, $actorId);
+            $this->assertDineInReportable($order->fresh());
             PosIdempotencyKey::create(['cashier_id' => $actorId, 'operation' => 'create', 'idempotency_key' => $idempotencyKey, 'request_hash' => $hash, 'pos_order_id' => $order->getKey(), 'response_payload' => ['pos_order_id' => $order->getKey()]]);
             $this->event($order, $actorId, 'draft_created', ['service_type' => $service]);
 
@@ -79,12 +88,118 @@ final class PosOrderService implements PosOrderServiceContract
                 throw new PosException(str_replace('restaurantops_', 'pos_', $e->errorCode), $e->getMessage(), $e->status);
             }
             $configuration = array_except($resolved, ['price_breakdown', 'authoritative_unit_total', 'authoritative_line_total']);
-            $item = PosOrderItem::create(['pos_order_id' => $locked->getKey(), 'menu_id' => $resolved['menu_id'], 'variant_id' => $resolved['variant']['id'], 'quantity' => $resolved['quantity'], 'item_note' => $resolved['item_note'], 'configuration_payload' => $configuration, 'pricing_payload' => $resolved['price_breakdown'], 'configuration_hash' => $resolved['configuration_hash'], 'unit_total' => $resolved['authoritative_unit_total'], 'line_total' => $resolved['authoritative_line_total']]);
+            $itemNote = trim((string) $resolved['item_note']) ?: null;
+            $item = PosOrderItem::query()
+                ->where('pos_order_id', $locked->getKey())
+                ->where('status', 'unsent')
+                ->where('menu_id', $resolved['menu_id'])
+                ->where('variant_id', $resolved['variant']['id'])
+                ->where('configuration_hash', $resolved['configuration_hash'])
+                ->where('item_note', $itemNote)
+                ->lockForUpdate()
+                ->first();
+
+            if ($item) {
+                $quantity = $item->quantity + (int) $resolved['quantity'];
+                $item->forceFill([
+                    'quantity' => $quantity,
+                    'line_total' => $this->multiply((string) $item->unit_total, $quantity),
+                    'version' => $item->version + 1,
+                ])->save();
+                PosIdempotencyKey::create(['cashier_id' => $actorId, 'operation' => 'item.add', 'idempotency_key' => $idempotencyKey, 'request_hash' => $hash, 'pos_order_id' => $locked->getKey(), 'response_payload' => ['item_id' => $item->getKey()]]);
+                $this->recalculate($locked);
+                $this->event($locked, $actorId, 'item_quantity_incremented', ['item_id' => $item->getKey(), 'menu_id' => $item->menu_id, 'quantity' => $quantity]);
+
+                return $item;
+            }
+
+            $item = PosOrderItem::create(['pos_order_id' => $locked->getKey(), 'menu_id' => $resolved['menu_id'], 'variant_id' => $resolved['variant']['id'], 'quantity' => $resolved['quantity'], 'item_note' => $itemNote, 'configuration_payload' => $configuration, 'pricing_payload' => $resolved['price_breakdown'], 'configuration_hash' => $resolved['configuration_hash'], 'unit_total' => $resolved['authoritative_unit_total'], 'line_total' => $resolved['authoritative_line_total']]);
             PosIdempotencyKey::create(['cashier_id' => $actorId, 'operation' => 'item.add', 'idempotency_key' => $idempotencyKey, 'request_hash' => $hash, 'pos_order_id' => $locked->getKey(), 'response_payload' => ['item_id' => $item->getKey()]]);
             $this->recalculate($locked);
             $this->event($locked, $actorId, 'item_added', ['item_id' => $item->getKey(), 'menu_id' => $item->menu_id]);
 
             return $item;
+        }, 3);
+    }
+
+    public function updateDetails(PosOrder $order, mixed $actor, array $data, int $version): PosOrder
+    {
+        return DB::transaction(function () use ($order, $actor, $data, $version): PosOrder {
+            $locked = $this->lockEditable($order, (int) $actor->getAuthIdentifier(), $version);
+            $locked->forceFill([
+                'guest_name' => trim((string) ($data['guest_name'] ?? $locked->guest_name)) ?: null,
+                'guest_phone' => trim((string) ($data['guest_phone'] ?? $locked->guest_phone)) ?: null,
+                'waiter_id' => array_key_exists('waiter_id', $data) ? ($data['waiter_id'] ?: null) : $locked->waiter_id,
+                'guest_count' => array_key_exists('guest_count', $data) ? max(1, (int) $data['guest_count']) : $locked->guest_count,
+                'order_note' => array_key_exists('order_note', $data) ? trim((string) $data['order_note']) : $locked->order_note,
+                'version' => $locked->version + 1,
+            ])->save();
+            $this->syncTableSession($locked, $data['table_id'] ?? null, (int) $actor->getAuthIdentifier());
+            $this->assertDineInReportable($locked->fresh());
+            $this->event($locked, (int) $actor->getAuthIdentifier(), 'details_updated');
+
+            return $locked->fresh(['items']);
+        }, 3);
+    }
+
+    public function updateItem(PosOrder $order, PosOrderItem $item, mixed $actor, array $data, int $version): PosOrder
+    {
+        return DB::transaction(function () use ($order, $item, $actor, $data, $version): PosOrder {
+            $locked = $this->lockEditable($order, (int) $actor->getAuthIdentifier(), $version);
+            $item = PosOrderItem::query()
+                ->where('pos_order_id', $locked->getKey())
+                ->whereKey($item->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if (in_array($item->status, ['removed', 'voided'], true)) {
+                throw PosException::conflict('pos_item_removed', 'This item is already removed.');
+            }
+
+            $quantity = filter_var($data['quantity'] ?? $item->quantity, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => 999]]);
+            if (! $quantity) {
+                throw new PosException('pos_item_quantity_invalid', 'Quantity must be at least 1.');
+            }
+
+            $note = array_key_exists('item_note', $data) ? trim((string) $data['item_note']) : $item->item_note;
+            $item->forceFill([
+                'quantity' => $quantity,
+                'item_note' => $note ?: null,
+                'line_total' => $this->multiply((string) $item->unit_total, (int) $quantity),
+                'version' => $item->version + 1,
+            ])->save();
+
+            $this->recalculate($locked);
+            $this->event($locked, (int) $actor->getAuthIdentifier(), 'item_updated', ['item_id' => $item->getKey(), 'quantity' => $quantity]);
+
+            return $locked->fresh(['items']);
+        }, 3);
+    }
+
+    public function removeItem(PosOrder $order, PosOrderItem $item, mixed $actor, int $version, ?string $reason = null): PosOrder
+    {
+        return DB::transaction(function () use ($order, $item, $actor, $version, $reason): PosOrder {
+            $locked = $this->lockEditable($order, (int) $actor->getAuthIdentifier(), $version);
+            $item = PosOrderItem::query()
+                ->where('pos_order_id', $locked->getKey())
+                ->whereKey($item->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if ((int) $item->kitchen_sent_quantity > 0) {
+                throw PosException::conflict('pos_void_approval_required', 'Kitchen-visible items require void approval.');
+            }
+
+            $item->forceFill([
+                'status' => 'removed',
+                'item_note' => trim((string) $reason) ?: $item->item_note,
+                'version' => $item->version + 1,
+            ])->save();
+
+            $this->recalculate($locked);
+            $this->event($locked, (int) $actor->getAuthIdentifier(), 'item_removed', ['item_id' => $item->getKey(), 'reason' => $reason]);
+
+            return $locked->fresh(['items']);
         }, 3);
     }
 
@@ -109,8 +224,12 @@ final class PosOrderService implements PosOrderServiceContract
             if (! $locked->items()->where('status', 'unsent')->exists()) {
                 throw new PosException('pos_item_invalid', 'At least one item is required.');
             }
+            $this->assertDineInReportable($locked);
             $official = $this->syncOfficial($locked);
             $locked->forceFill(['order_id' => $official->getKey(), 'status' => PosOrderStatus::ACTIVE, 'version' => $locked->version + 1])->save();
+            if ($locked->table_session_id) {
+                TableSession::whereKey($locked->table_session_id)->update(['official_order_id' => $official->getKey()]);
+            }
             $this->event($locked, (int) $actor->getAuthIdentifier(), 'official_order_synchronized', ['order_id' => $official->getKey()]);
 
             return $locked->fresh(['items']);
@@ -145,6 +264,9 @@ final class PosOrderService implements PosOrderServiceContract
         return DB::transaction(function () use ($order, $actor, $version, $to, $attributes, $event): PosOrder {
             $locked = $this->lock($order, (int) $actor->getAuthIdentifier(), $version);
             $this->states->assertCan($locked->status, $to);
+            if (in_array($to, [PosOrderStatus::ACTIVE, PosOrderStatus::KITCHEN_PENDING, PosOrderStatus::PAYMENT_PENDING], true)) {
+                $this->assertDineInReportable($locked);
+            }
             $locked->forceFill($attributes + ['status' => $to, 'version' => $locked->version + 1])->save();
             $this->event($locked, (int) $actor->getAuthIdentifier(), $event);
 
@@ -215,6 +337,56 @@ final class PosOrderService implements PosOrderServiceContract
         }
     }
 
+    private function validateDineInInput(string $service, array $data): void
+    {
+        if ($service !== 'dine_in') {
+            return;
+        }
+
+        if (empty($data['table_id'])) {
+            throw new PosException('pos_dine_in_table_required', 'Select a table for dine-in orders.');
+        }
+
+        $waiterId = filter_var($data['waiter_id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+        if (! $waiterId) {
+            throw new PosException('pos_dine_in_waiter_required', 'Select a waiter for dine-in orders.');
+        }
+        $this->assertWaiterAvailable((int) $waiterId);
+
+        $guestCount = filter_var($data['guest_count'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => 999]]);
+        if (! $guestCount) {
+            throw new PosException('pos_dine_in_guest_count_required', 'Guest count is required for dine-in orders.');
+        }
+    }
+
+    private function assertDineInReportable(PosOrder $order): void
+    {
+        if ($order->service_type !== 'dine_in') {
+            return;
+        }
+
+        if (! $order->table_session_id) {
+            throw new PosException('pos_dine_in_table_required', 'Select a table for dine-in orders.');
+        }
+
+        if (! $order->waiter_id) {
+            throw new PosException('pos_dine_in_waiter_required', 'Select a waiter for dine-in orders.');
+        }
+        $this->assertWaiterAvailable((int) $order->waiter_id);
+
+        if ((int) $order->guest_count < 1) {
+            throw new PosException('pos_dine_in_guest_count_required', 'Guest count is required for dine-in orders.');
+        }
+    }
+
+    private function assertWaiterAvailable(int $waiterId): void
+    {
+        $waiter = User::query()->whereKey($waiterId)->where('status', true)->first();
+        if (! $waiter || (! $waiter->hasPermission('Restaurant.Waiter.Access') && ! $waiter->hasPermission('Restaurant.POS.Access'))) {
+            throw new PosException('pos_waiter_invalid', 'Selected waiter is not available.');
+        }
+    }
+
     private function assertNoClientMoney(array $data): void
     {
         foreach (['price', 'unit_total', 'line_total', 'subtotal', 'tax', 'total', 'discount'] as $field) {
@@ -231,13 +403,26 @@ final class PosOrderService implements PosOrderServiceContract
         $order->forceFill(['subtotal' => $subtotal, 'order_total' => $subtotal, 'outstanding_total' => $subtotal, 'configuration_hash' => $hash, 'pricing_hash' => $hash, 'version' => $order->version + 1])->save();
     }
 
+    private function multiply(string $amount, int $quantity): string
+    {
+        [$whole, $fraction] = array_pad(explode('.', $amount, 2), 2, '');
+        $minor = (((int) $whole * 10000) + (int) str_pad($fraction, 4, '0')) * $quantity;
+
+        return intdiv($minor, 10000).'.'.str_pad((string) ($minor % 10000), 4, '0', STR_PAD_LEFT);
+    }
+
     private function syncOfficial(PosOrder $pos): Order
     {
         if ($pos->order_id && $found = Order::find($pos->order_id)) {
             return $found;
         } $name = preg_split('/\s+/', trim((string) $pos->guest_name), 2);
+        $orderType = match ($pos->service_type) {
+            'dine_in' => 'dine_in',
+            'delivery' => Order::DELIVERY,
+            default => Order::COLLECTION,
+        };
         $official = new Order;
-        $official->forceFill(['customer_id' => $pos->customer_id, 'location_id' => $pos->location_id, 'first_name' => $name[0] ?? '', 'last_name' => $name[1] ?? '', 'email' => $pos->guest_email ?? '', 'telephone' => $pos->guest_phone ?? '', 'comment' => $pos->order_note, 'order_type' => $pos->service_type === 'delivery' ? Order::DELIVERY : Order::COLLECTION, 'order_date' => now()->toDateString(), 'order_time' => now()->format('H:i'), 'order_time_is_asap' => true, 'total_items' => $pos->items()->sum('quantity'), 'order_total' => $pos->order_total, 'processed' => false, 'ip_address' => request()->ip()])->save();
+        $official->forceFill(['customer_id' => $pos->customer_id, 'location_id' => $pos->location_id, 'first_name' => $name[0] ?? '', 'last_name' => $name[1] ?? '', 'email' => $pos->guest_email ?: 'pos-guest@example.test', 'telephone' => $pos->guest_phone ?: '0000000000', 'comment' => $pos->order_note, 'order_type' => $orderType, 'order_date' => now()->toDateString(), 'order_time' => now()->format('H:i'), 'order_time_is_asap' => true, 'total_items' => $pos->items()->sum('quantity'), 'order_total' => $pos->order_total, 'processed' => false, 'ip_address' => request()->ip()])->save();
         foreach ($pos->items as $item) {
             $config = $item->configuration_payload;
             $row = OrderMenu::create(['order_id' => $official->getKey(), 'menu_id' => $item->menu_id, 'name' => $config['menu_name'] ?? 'Menu item', 'quantity' => $item->quantity, 'price' => $item->unit_total, 'subtotal' => $item->line_total, 'comment' => $item->item_note, 'option_values' => serialize($config['_official_menu_options'] ?? [])]);
@@ -251,6 +436,53 @@ final class PosOrderService implements PosOrderServiceContract
         }
 
         return $official;
+    }
+
+    private function syncTableSession(PosOrder $order, mixed $tableId, int $actorId): void
+    {
+        if (! $tableId) {
+            if ($order->service_type === 'dine_in' && $order->table_session_id) {
+                TableSession::whereKey($order->table_session_id)->update(['guest_count' => $order->guest_count ?: 1]);
+            }
+
+            return;
+        }
+
+        if ($order->service_type !== 'dine_in') {
+            throw new PosException('pos_table_requires_dine_in', 'A table can only be assigned to dine-in orders.');
+        }
+
+        $table = RestaurantTable::query()
+            ->where('location_id', $order->location_id)
+            ->where('is_active', true)
+            ->lockForUpdate()
+            ->findOrFail((int) $tableId);
+
+        $existing = TableSession::query()
+            ->where('active_table_id', $table->getKey())
+            ->whereIn('status', [TableSessionStatus::OPEN, TableSessionStatus::BILLING])
+            ->lockForUpdate()
+            ->first();
+
+        if ($existing && (int) $existing->pos_order_id !== (int) $order->getKey()) {
+            throw PosException::conflict('pos_table_occupied', 'This table is already occupied.');
+        }
+
+        if ($order->table_session_id) {
+            $session = TableSession::query()->lockForUpdate()->find($order->table_session_id);
+            if ($session && (int) $session->active_table_id !== (int) $table->getKey()) {
+                RestaurantTable::whereKey($session->active_table_id)->update(['status' => TableStatus::AVAILABLE]);
+                $session->forceFill(['table_id' => $table->getKey(), 'active_table_id' => $table->getKey(), 'guest_count' => $order->guest_count ?: 1, 'version' => $session->version + 1])->save();
+                $order->forceFill(['table_session_id' => $session->getKey()])->save();
+            } elseif ($session) {
+                $session->forceFill(['guest_count' => $order->guest_count ?: 1, 'version' => $session->version + 1])->save();
+            }
+        } elseif (! $existing) {
+            $session = TableSession::create(['location_id' => $order->location_id, 'table_id' => $table->getKey(), 'active_table_id' => $table->getKey(), 'pos_order_id' => $order->getKey(), 'official_order_id' => $order->order_id, 'guest_count' => $order->guest_count ?: 1, 'opened_by' => $actorId, 'opened_at' => now(), 'status' => TableSessionStatus::OPEN]);
+            $order->forceFill(['table_session_id' => $session->getKey()])->save();
+        }
+
+        $table->forceFill(['status' => TableStatus::OCCUPIED])->save();
     }
 
     private function replay(int $actor, string $operation, string $key, string $hash): ?int

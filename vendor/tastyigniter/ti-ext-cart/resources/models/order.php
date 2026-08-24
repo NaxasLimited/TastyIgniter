@@ -33,8 +33,11 @@ $config['list']['filter'] = [
             'label' => 'lang:igniter.cart::default.orders.text_filter_order_type',
             'type' => 'select',
             'conditions' => 'order_type = :filtered',
-            'modelClass' => Location::class,
-            'options' => 'getOrderTypeOptions',
+            'options' => [
+                'delivery' => 'lang:igniter.cart::default.orders.text_delivery',
+                'collection' => 'lang:igniter.cart::default.orders.text_collection',
+                'dine_in' => 'Dine in',
+            ],
         ],
         'payment' => [
             'label' => 'lang:igniter.cart::default.orders.text_filter_payment',

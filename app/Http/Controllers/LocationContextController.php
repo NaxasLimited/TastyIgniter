@@ -24,6 +24,7 @@ class LocationContextController extends Controller
             'isGlobal' => $this->context->isGlobal(),
             'canViewAll' => app('admin.auth')->user()->hasPermission('Restaurant.LocationContext.ViewAll'),
             'canSelectInactive' => app('admin.auth')->user()->hasPermission('Admin.Locations'),
+            'redirect' => (string) $request->query('redirect', ''),
         ];
 
         return $request->expectsJson()
@@ -40,7 +41,7 @@ class LocationContextController extends Controller
 
     public function switch(Request $request): RedirectResponse|JsonResponse
     {
-        $validated = $request->validate(['location_id' => ['required', 'integer']]);
+        $validated = $request->validate(['location_id' => ['required', 'integer'], 'redirect' => ['nullable', 'string']]);
         try {
             $location = $this->context->set($validated['location_id']);
         } catch (AuthorizationException $exception) {
@@ -49,7 +50,7 @@ class LocationContextController extends Controller
 
         return $request->expectsJson()
             ? response()->json(['data' => ['active_location_id' => $location->getKey()]])
-            : redirect()->intended(route('naxas.restaurantops.overview'));
+            : $this->redirectAfterSelection($request);
     }
 
     public function global(Request $request): RedirectResponse|JsonResponse
@@ -62,7 +63,17 @@ class LocationContextController extends Controller
 
         return $request->expectsJson()
             ? response()->json(['data' => ['global' => true]])
-            : redirect()->intended(route('naxas.restaurantops.overview'));
+            : $this->redirectAfterSelection($request);
+    }
+
+    protected function redirectAfterSelection(Request $request): RedirectResponse
+    {
+        $redirect = (string) $request->input('redirect', '');
+        if ($redirect !== '' && str_starts_with($redirect, url('/'))) {
+            return redirect()->to($redirect);
+        }
+
+        return redirect()->intended(route('naxas.restaurantops.overview'));
     }
 
     protected function forbidden(Request $request, string $message): RedirectResponse|JsonResponse

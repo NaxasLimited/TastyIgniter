@@ -4271,7 +4271,7 @@ ${expression ? 'Expression: "' + expression + '"\n\n' : ""}`, el);
           this.component.mergeNewSnapshot(snapshot, effects, updates);
           this.component.processEffects(this.component.effects);
         });
-        if (effects["returns"]) {
+        if (Object.prototype.hasOwnProperty.call(effects, "returns") && effects["returns"]) {
           let returns = effects["returns"];
           let returnHandlerStack = this.calls.map(({ handleReturn }) => handleReturn);
           returnHandlerStack.forEach((handleReturn, index) => {
@@ -4464,6 +4464,8 @@ ${expression ? 'Expression: "' + expression + '"\n\n' : ""}`, el);
     }
     if (response.redirected) {
       window.location.href = response.url;
+      finishProfile({ content, failed: false });
+      return;
     }
     if (contentIsFromDump(content)) {
       let dump;
@@ -4758,11 +4760,14 @@ ${expression ? 'Expression: "' + expression + '"\n\n' : ""}`, el);
     inscribeSnapshotAndEffectsOnElement() {
       let el = this.el;
       el.setAttribute("wire:snapshot", this.snapshotEncoded);
-      let effects = this.originalEffects.listeners ? { listeners: this.originalEffects.listeners } : {};
-      if (this.originalEffects.url) {
+      let effects = {};
+      if (Object.prototype.hasOwnProperty.call(this.originalEffects, "listeners") && this.originalEffects.listeners) {
+        effects.listeners = this.originalEffects.listeners;
+      }
+      if (Object.prototype.hasOwnProperty.call(this.originalEffects, "url") && this.originalEffects.url) {
         effects.url = this.originalEffects.url;
       }
-      if (this.originalEffects.scripts) {
+      if (Object.prototype.hasOwnProperty.call(this.originalEffects, "scripts") && this.originalEffects.scripts) {
         effects.scripts = this.originalEffects.scripts;
       }
       el.setAttribute("wire:effects", JSON.stringify(effects));
@@ -9130,10 +9135,12 @@ ${expression ? 'Expression: "' + expression + '"\n\n' : ""}`, el);
       return {};
     let insertDotNotatedValueIntoData = (key, value, data3) => {
       let [first2, second, ...rest] = key.split(".");
+      if (first2 === "__proto__" || first2 === "constructor" || first2 === "prototype")
+        return;
       if (!second)
         return data3[key] = value;
-      if (data3[first2] === void 0) {
-        data3[first2] = isNaN(second) ? {} : [];
+      if (!Object.prototype.hasOwnProperty.call(data3, first2)) {
+        data3[first2] = isNaN(second) ? /* @__PURE__ */ Object.create(null) : [];
       }
       insertDotNotatedValueIntoData([second, ...rest].join("."), value, data3[first2]);
     };
@@ -9773,7 +9780,11 @@ ${expression ? 'Expression: "' + expression + '"\n\n' : ""}`, el);
 
   // js/features/supportListeners.js
   on2("effect", ({ component, effects }) => {
-    registerListeners(component, effects.listeners || []);
+    let listeners2 = [];
+    if (Object.prototype.hasOwnProperty.call(effects, "listeners") && effects.listeners) {
+      listeners2 = effects.listeners;
+    }
+    registerListeners(component, listeners2);
   });
   function registerListeners(component, listeners2) {
     listeners2.forEach((name) => {
@@ -9819,7 +9830,10 @@ ${expression ? 'Expression: "' + expression + '"\n\n' : ""}`, el);
     }
   });
   on2("effect", ({ component, effects }) => {
-    let scripts = effects.scripts;
+    let scripts;
+    if (Object.prototype.hasOwnProperty.call(effects, "scripts")) {
+      scripts = effects.scripts;
+    }
     if (scripts) {
       Object.entries(scripts).forEach(([key, content]) => {
         onlyIfScriptHasntBeenRunAlreadyForThisComponent(component, key, () => {
@@ -9902,8 +9916,14 @@ ${expression ? 'Expression: "' + expression + '"\n\n' : ""}`, el);
     return component.$wire.js;
   });
   on2("effect", ({ component, effects }) => {
-    let js = effects.js;
-    let xjs = effects.xjs;
+    let js;
+    let xjs;
+    if (Object.prototype.hasOwnProperty.call(effects, "js")) {
+      js = effects.js;
+    }
+    if (Object.prototype.hasOwnProperty.call(effects, "xjs")) {
+      xjs = effects.xjs;
+    }
     if (js) {
       Object.entries(js).forEach(([method, body]) => {
         overrideMethod(component, method, () => {
@@ -10016,7 +10036,10 @@ ${expression ? 'Expression: "' + expression + '"\n\n' : ""}`, el);
 
   // js/features/supportMorphDom.js
   on2("effect", ({ component, effects }) => {
-    let html = effects.html;
+    let html;
+    if (Object.prototype.hasOwnProperty.call(effects, "html")) {
+      html = effects.html;
+    }
     if (!html)
       return;
     queueMicrotask(() => {
@@ -10031,7 +10054,11 @@ ${expression ? 'Expression: "' + expression + '"\n\n' : ""}`, el);
     queueMicrotask(() => {
       queueMicrotask(() => {
         queueMicrotask(() => {
-          dispatchEvents(component, effects.dispatches || []);
+          let dispatches = [];
+          if (Object.prototype.hasOwnProperty.call(effects, "dispatches") && effects.dispatches) {
+            dispatches = effects.dispatches;
+          }
+          dispatchEvents(component, dispatches);
         });
       });
     });
@@ -10183,7 +10210,10 @@ ${expression ? 'Expression: "' + expression + '"\n\n' : ""}`, el);
   // js/features/supportFileDownloads.js
   on2("commit", ({ succeed }) => {
     succeed(({ effects }) => {
-      let download = effects.download;
+      let download;
+      if (Object.prototype.hasOwnProperty.call(effects, "download")) {
+        download = effects.download;
+      }
       if (!download)
         return;
       let urlObject = window.webkitURL || window.URL;
@@ -10244,7 +10274,10 @@ ${expression ? 'Expression: "' + expression + '"\n\n' : ""}`, el);
 
   // js/features/supportQueryString.js
   on2("effect", ({ component, effects, cleanup: cleanup2 }) => {
-    let queryString = effects["url"];
+    let queryString;
+    if (Object.prototype.hasOwnProperty.call(effects, "url")) {
+      queryString = effects["url"];
+    }
     if (!queryString)
       return;
     Object.entries(queryString).forEach(([key, value]) => {
@@ -10300,7 +10333,10 @@ ${expression ? 'Expression: "' + expression + '"\n\n' : ""}`, el);
     }
   });
   on2("effect", ({ component, effects }) => {
-    let listeners2 = effects.listeners || [];
+    let listeners2 = [];
+    if (Object.prototype.hasOwnProperty.call(effects, "listeners") && effects.listeners) {
+      listeners2 = effects.listeners;
+    }
     listeners2.forEach((event) => {
       if (event.startsWith("echo")) {
         if (typeof window.Echo === "undefined") {
@@ -10381,7 +10417,10 @@ ${expression ? 'Expression: "' + expression + '"\n\n' : ""}`, el);
     }
   }
   function shouldRedirectUsingNavigateOr(effects, url, or) {
-    let forceNavigate = effects.redirectUsingNavigate;
+    let forceNavigate;
+    if (Object.prototype.hasOwnProperty.call(effects, "redirectUsingNavigate")) {
+      forceNavigate = effects.redirectUsingNavigate;
+    }
     if (forceNavigate) {
       Alpine.navigate(url);
     } else {
@@ -10398,7 +10437,7 @@ ${expression ? 'Expression: "' + expression + '"\n\n' : ""}`, el);
 
   // js/features/supportRedirects.js
   on2("effect", ({ effects }) => {
-    if (!effects["redirect"])
+    if (!Object.prototype.hasOwnProperty.call(effects, "redirect") || !effects["redirect"])
       return;
     let url = effects["redirect"];
     shouldRedirectUsingNavigateOr(effects, url, () => {
@@ -10955,7 +10994,8 @@ ${expression ? 'Expression: "' + expression + '"\n\n' : ""}`, el);
   function getModifierTail(modifiers) {
     modifiers = modifiers.filter((i) => ![
       "lazy",
-      "defer"
+      "defer",
+      "blur"
     ].includes(i));
     if (modifiers.length === 0)
       return "";

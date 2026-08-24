@@ -39,7 +39,7 @@ return [
         'operations' => 'Restaurant Operations', 'overview' => 'Operations Overview', 'head_office' => 'Head Office',
         'branch' => 'Branch Operations', 'cashier' => 'Cashier Workspace', 'waiter' => 'Waiter Workspace', 'kitchen' => 'Kitchen Workspace',
         'menu_configuration' => 'Menu Operations Settings', 'menu_operations_settings' => 'Menu Operations Settings', 'shifts' => 'Shifts', 'active_shift' => 'My Active Shift', 'shift_review' => 'Branch Shift Review',
-        'pos' => 'POS', 'active_orders' => 'Active Orders', 'held_orders' => 'Held Orders', 'table_map' => 'Table Map', 'tables' => 'Floors & Tables',
+        'pos' => 'POS', 'active_orders' => 'Active Orders', 'held_orders' => 'Held Orders', 'table_map' => 'Table Map', 'tables' => 'Floors & Tables', 'reports' => 'Reports',
     ],
     'pos' => ['title' => 'Point of Sale', 'service' => 'Service type', 'customer' => 'Customer or guest', 'catalog' => 'Menu catalog', 'search' => 'Search menu', 'order' => 'Current order', 'totals' => 'Authoritative totals', 'hold' => 'Hold', 'recall' => 'Recall', 'confirm' => 'Confirm order', 'kitchen' => 'Send to Kitchen — queue available in a later phase', 'payment' => 'Prepare for Payment', 'no_shift' => 'Open your cashier shift before creating a POS order.'],
     'menu_configuration' => [
@@ -55,5 +55,14 @@ return [
         'provider' => 'Payment source verification', 'movements' => 'Cash movements', 'type' => 'Type', 'amount' => 'Amount',
         'reason' => 'Reason', 'no_movements' => 'No cash movements.', 'timeline' => 'Audit timeline',
         'closing_requested' => 'Closing requested', 'submission' => 'Submission revision', 'approved' => 'Approved',
+    ],
+    'dashboard' => [
+        'today_sales' => 'Today Sales',
+        'active_dine_in' => 'Active Dine-in',
+        'unpaid_orders' => 'Unpaid POS Orders',
+        'paid_cash_today' => 'Paid Today - Cash',
+        'paid_bkash_today' => 'Paid Today - bKash',
+        'paid_nagad_today' => 'Paid Today - Nagad',
+        'paid_card_today' => 'Paid Today - Card',
     ],
 ];

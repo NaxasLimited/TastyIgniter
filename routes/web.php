@@ -13,7 +13,32 @@
 
 use App\Http\Controllers\LocationContextController;
 use Igniter\Flame\Support\Facades\Igniter;
+use Igniter\User\Facades\AdminAuth;
+use Igniter\User\Models\User;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Validation\ValidationException;
+
+Route::post(Igniter::adminUri().'/local-login', function(Request $request) {
+    $data = $request->validate([
+        'email' => ['required', 'email'],
+        'password' => ['required', 'string'],
+    ]);
+
+    $user = User::query()->whereEmail($data['email'])->whereIsEnabled()->first();
+
+    if (!$user || !Hash::check($data['password'], $user->password)) {
+        throw ValidationException::withMessages([
+            'email' => lang('igniter.user::default.login.alert_login_failed'),
+        ]);
+    }
+
+    AdminAuth::login($user, true);
+    $request->session()->regenerate();
+
+    return redirect(admin_url('dashboard'));
+});
 
 Route::middleware(['web', 'igniter', 'igniter:admin', 'location.context', 'restaurant.ops.permission:Restaurant.LocationContext.Access'])
     ->prefix(Igniter::adminUri())

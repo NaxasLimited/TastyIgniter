@@ -6,6 +6,8 @@ namespace Naxas\RestaurantOps\Payments;
 
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Igniter\Cart\Models\Order;
+use Igniter\Cart\Models\OrderTotal;
 use Naxas\RestaurantOps\Contracts\AuditLogger;
 use Naxas\RestaurantOps\Contracts\LocationContextContract;
 use Naxas\RestaurantOps\Models\CashierShift;
@@ -59,7 +61,8 @@ final class PosPaymentService
             $this->shifts->assertSettleable($shift, $actorId, (int) $location->getKey());
             if ((int) $locked->cashier_id !== $actorId) {
                 throw PaymentException::forbidden('payment_cashier_forbidden', 'Only the order cashier may settle it.');
-            } $outstanding = $this->official->outstanding((int) $locked->order_id);
+            } $this->applyDiscount($locked, (array) ($data['discount'] ?? []));
+            $outstanding = $this->official->outstanding((int) $locked->order_id);
             if (Money::minor($outstanding) !== Money::minor((string) $locked->outstanding_total)) {
                 throw PaymentException::conflict('payment_snapshot_mismatch', 'The official outstanding amount differs from the locked POS snapshot.');
             } $tenders = $this->allocator->allocate($outstanding, (array) ($data['tenders'] ?? []), (bool) config('restaurant-ops.payment.require_reference', true));
@@ -70,7 +73,7 @@ final class PosPaymentService
             } $this->event($payment, $actorId, 'official_sync_started', ['methods' => array_column($tenders, 'method')]);
             $reference = $this->official->synchronize($payment, ['tenders' => array_map(fn ($t) => array_intersect_key($t, array_flip(['method', 'provider_code', 'reference', 'amount_applied'])), $tenders)]);
             $receiptNo = $this->numbers->next((int) $locked->location_id, (string) ($location->location_name ?? $locked->location_id));
-            $receipt = PosReceipt::create(['pos_payment_id' => $payment->getKey(), 'official_order_id' => $locked->order_id, 'receipt_number' => $receiptNo, 'location_snapshot' => ['id' => $locked->location_id, 'name' => $location->location_name ?? 'Branch', 'address' => $location->location_address ?? null, 'telephone' => $location->location_telephone ?? null], 'cashier_snapshot' => ['id' => $actorId, 'name' => $actor->staff_name ?? $actor->username ?? ('Staff '.$actorId)], 'customer_snapshot' => ['id' => $locked->customer_id, 'name' => $locked->guest_name, 'phone' => $locked->guest_phone], 'item_snapshot' => $locked->items()->get()->map(fn ($i) => ['name' => $i->configuration_payload['menu_name'] ?? 'Menu item', 'variant' => $i->configuration_payload['variant']['name'] ?? null, 'quantity' => $i->quantity, 'unit_price' => $i->unit_total, 'line_total' => $i->line_total])->all(), 'totals_snapshot' => ['subtotal' => $locked->subtotal, 'discount' => $locked->discount_total, 'tax' => $locked->tax_total, 'delivery' => $locked->delivery_total, 'grand_total' => $outstanding], 'tender_snapshot' => $tenders, 'tax_snapshot' => ['total' => $locked->tax_total], 'footer_snapshot' => ['restaurant_name' => config('restaurant-ops.payment.receipt.restaurant_name', 'Ottoman Express'), 'message' => config('restaurant-ops.payment.receipt.footer', 'Thank you.')], 'issued_at' => now()]);
+            $receipt = PosReceipt::create(['pos_payment_id' => $payment->getKey(), 'official_order_id' => $locked->order_id, 'receipt_number' => $receiptNo, 'location_snapshot' => ['id' => $locked->location_id, 'name' => $location->location_name ?? 'Branch', 'address' => $location->location_address ?? null, 'telephone' => $location->location_telephone ?? null], 'cashier_snapshot' => ['id' => $actorId, 'name' => $actor->name ?? $actor->username ?? ('Staff '.$actorId)], 'customer_snapshot' => ['id' => $locked->customer_id, 'name' => $locked->guest_name, 'phone' => $locked->guest_phone], 'item_snapshot' => $locked->items()->get()->map(fn ($i) => ['name' => $i->configuration_payload['menu_name'] ?? 'Menu item', 'variant' => $i->configuration_payload['variant']['name'] ?? null, 'note' => $i->item_note, 'quantity' => $i->quantity, 'unit_price' => $i->unit_total, 'line_total' => $i->line_total])->all(), 'totals_snapshot' => ['subtotal' => $locked->subtotal, 'discount' => $locked->discount_total, 'tax' => $locked->tax_total, 'delivery' => $locked->delivery_total, 'grand_total' => $outstanding], 'tender_snapshot' => $tenders, 'tax_snapshot' => ['total' => $locked->tax_total], 'footer_snapshot' => ['restaurant_name' => config('restaurant-ops.payment.receipt.restaurant_name', 'Ottoman Express'), 'message' => config('restaurant-ops.payment.receipt.footer', 'Thank you.')], 'issued_at' => now()]);
             $payment->forceFill(['status' => 'paid', 'official_payment_reference' => $reference, 'receipt_number' => $receiptNo, 'paid_at' => now(), 'version' => 2])->save();
             $locked->forceFill(['status' => PosOrderStatus::PAID, 'outstanding_total' => '0.0000', 'version' => $locked->version + 1])->save();
             $this->event($payment, $actorId, 'receipt_issued', ['receipt_number' => $receiptNo]);
@@ -117,6 +120,32 @@ final class PosPaymentService
     private function event(PosPayment $payment, int $actor, string $type, array $payload = []): void
     {
         PosPaymentEvent::create(['pos_payment_id' => $payment->getKey(), 'event_type' => $type, 'actor_id' => $actor, 'payload' => $payload ?: null, 'correlation_id' => (string) Str::uuid(), 'occurred_at' => now()]);
+    }
+
+    private function applyDiscount(PosOrder $order, array $discount): void
+    {
+        if (! isset($discount['amount']) || Money::minor((string) $discount['amount']) <= 0) {
+            return;
+        }
+
+        $subtotalMinor = Money::minor((string) $order->subtotal);
+        $discountMinor = min($subtotalMinor, Money::minor((string) $discount['amount']));
+        $total = Money::decimal(max(0, $subtotalMinor - $discountMinor));
+        $discountTotal = Money::decimal($discountMinor);
+        $order->forceFill([
+            'discount_total' => $discountTotal,
+            'order_total' => $total,
+            'outstanding_total' => $total,
+        ])->save();
+
+        $official = Order::query()->lockForUpdate()->find($order->order_id);
+        if (! $official) {
+            return;
+        }
+
+        $official->forceFill(['order_total' => $total])->saveQuietly();
+        OrderTotal::updateOrCreate(['order_id' => $official->getKey(), 'code' => 'discount'], ['title' => 'Discount', 'value' => '-'.$discountTotal, 'priority' => 500, 'is_summable' => false]);
+        OrderTotal::updateOrCreate(['order_id' => $official->getKey(), 'code' => 'total'], ['title' => 'Total', 'value' => $total, 'priority' => 999, 'is_summable' => false]);
     }
 
     private function hash(array $data): string

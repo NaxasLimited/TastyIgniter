@@ -40,3 +40,5 @@
         </tbody>
     </table>
 </div>
+
+@includeIf('Naxas.RestaurantOps::orders.pos_details')

@@ -6,7 +6,7 @@
                     'id' => 'edit-form',
                     'role' => 'form',
                     'method' => 'POST',
-                    'data-request' => 'onLogin',
+                    'url' => admin_url('local-login'),
                 ]) !!}
                     <h3 class="mb-4">@lang('igniter.user::default.login.text_title')</h3>
                     <div class="form-group mb-0">

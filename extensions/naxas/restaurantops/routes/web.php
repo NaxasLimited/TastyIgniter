@@ -8,6 +8,7 @@ use Naxas\RestaurantOps\Http\Controllers\MenuIntegration\OrderItemSnapshots;
 use Naxas\RestaurantOps\Http\Controllers\OperationalLandings;
 use Naxas\RestaurantOps\Http\Controllers\Payments\PosPayments;
 use Naxas\RestaurantOps\Http\Controllers\Pos\PosOrders;
+use Naxas\RestaurantOps\Http\Controllers\Reports\RestaurantReports;
 use Naxas\RestaurantOps\Http\Controllers\Shifts\CashierShifts;
 use Naxas\RestaurantOps\Http\Controllers\Tables\FloorsController;
 use Naxas\RestaurantOps\Http\Controllers\Tables\TablesController;
@@ -34,7 +35,10 @@ Route::middleware([...config('igniter-routes.adminMiddleware', ['web']), 'locati
         Route::get('/menu-operations-settings/{menu}', [MenuConfigurations::class, 'index'])->middleware('restaurant.ops.permission:Restaurant.MenuConfig.View')->name('menu-operations.show');
         Route::post('/menu-operations-settings/{menu}/variants', [MenuConfigurations::class, 'storeVariant'])->middleware('restaurant.ops.permission:Restaurant.MenuConfig.Variants.Manage')->name('menu-operations.variants.store');
         Route::delete('/menu-operations-settings/{menu}/variants/{variant}', [MenuConfigurations::class, 'archiveVariant'])->middleware('restaurant.ops.permission:Restaurant.MenuConfig.Variants.Manage')->name('menu-operations.variants.archive');
+        Route::post('/menu-operations-settings/{menu}/options', [MenuConfigurations::class, 'storeOptionGroup'])->middleware('restaurant.ops.permission:Restaurant.MenuConfig.Modifiers.Manage')->name('menu-operations.options.store');
+        Route::post('/menu-operations-settings/{menu}/official-options/sync', [MenuConfigurations::class, 'syncOfficialOptions'])->middleware('restaurant.ops.permission:Restaurant.MenuConfig.Modifiers.Manage')->name('menu-operations.official-options.sync');
         Route::get('/order-item-snapshots/{orderMenu}', [OrderItemSnapshots::class, 'show'])->middleware('restaurant.ops.permission:Restaurant.Operations.Access')->name('order-item-snapshots.show');
+        Route::get('/reports', [RestaurantReports::class, 'index'])->middleware('restaurant.ops.permission:Restaurant.Reports.BranchSales')->name('reports.index');
         Route::get('/shifts', [CashierShifts::class, 'index'])->middleware('restaurant.ops.permission:Restaurant.Shifts.Access')->name('shifts.index');
         Route::get('/shifts/mine', [CashierShifts::class, 'mine'])->middleware(['restaurant.ops.permission:Restaurant.Shifts.ViewOwn', 'restaurant.ops.transactional'])->name('shifts.mine');
         Route::get('/shifts/branch-review', [CashierShifts::class, 'branchReview'])->middleware(['restaurant.ops.permission:Restaurant.Shifts.ViewBranch', 'restaurant.ops.transactional'])->name('shifts.branch-review');

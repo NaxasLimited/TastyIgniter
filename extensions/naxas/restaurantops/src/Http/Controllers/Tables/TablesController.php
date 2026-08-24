@@ -17,7 +17,16 @@ use Throwable;
 final class TablesController extends AdminPageController
 {
     public function __construct(private readonly TableManagementService $tables) { parent::__construct(); }
-    public function index(): Response { return response($this->renderAdminPage('Naxas.RestaurantOps::tables.index', ['floors'=>Floor::where('location_id', app(LocationContextContract::class)->currentId())->orderBy('sort_order')->get(), 'tables'=>RestaurantTable::with('floor','activeSession.posOrder')->where('location_id', app(LocationContextContract::class)->currentId())->orderBy('sort_order')->get()], 'Restaurant Tables', 'restaurant-ops-tables')); }
+    public function index(): Response
+    {
+        $locations = app(LocationContextContract::class);
+        $activeLocation = $locations->current();
+        $locationId = $activeLocation?->getKey();
+        $floors = $locationId ? Floor::where('location_id', $locationId)->orderBy('sort_order')->get() : collect();
+        $tables = $locationId ? RestaurantTable::with('floor','activeSession.posOrder')->where('location_id', $locationId)->orderBy('sort_order')->get() : collect();
+
+        return response($this->renderAdminPage('Naxas.RestaurantOps::tables.index', compact('activeLocation', 'floors', 'tables'), 'Restaurant Tables', 'restaurant-ops-tables'));
+    }
     public function map(): Response { return response($this->renderAdminPage('Naxas.RestaurantOps::tables.map', ['floors'=>Floor::with('tables.activeSession.posOrder')->where('location_id', app(LocationContextContract::class)->currentId())->orderBy('sort_order')->get()], 'Table Map', 'restaurant-ops-table-map')); }
     public function store(): Response { return $this->respond(fn()=> $this->tables->saveTable($this->user(), request()->all()), 201); }
     public function update(string $table): Response { return $this->respond(fn()=> $this->tables->saveTable($this->user(), request()->all(), RestaurantTable::findOrFail($table))); }

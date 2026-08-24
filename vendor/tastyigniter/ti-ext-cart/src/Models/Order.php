@@ -107,6 +107,8 @@ class Order extends Model
 
     public const string COLLECTION = 'collection';
 
+    public const string DINE_IN = 'dine_in';
+
     /**
      * @var string The database table name
      */
@@ -190,11 +192,15 @@ class Order extends Model
 
     public function getOrderTypeNameAttribute()
     {
+        if ($this->order_type === static::DINE_IN) {
+            return 'Dine in';
+        }
+
         if (!$this->location) {
             return $this->order_type;
         }
 
-        return $this->location->availableOrderTypes()->get($this->order_type)?->getLabel();
+        return $this->location->availableOrderTypes()->get($this->order_type)?->getLabel() ?? $this->order_type;
     }
 
     public function getOrderDatetimeAttribute($value)

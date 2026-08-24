@@ -7,6 +7,7 @@ namespace Naxas\RestaurantOps\MenuIntegration;
 use Igniter\Cart\Models\Menu;
 use Igniter\Cart\Models\MenuItemOptionValue;
 use Igniter\Local\Models\Location;
+use Naxas\RestaurantOps\Contracts\LocationContextContract;
 use Naxas\RestaurantOps\MenuConfiguration\AttachmentResolver;
 use Naxas\RestaurantOps\MenuConfiguration\AvailabilityResolver;
 use Naxas\RestaurantOps\MenuConfiguration\PricingResolver;
@@ -40,7 +41,7 @@ final class MenuSelectionResolver
         if (! $location->location_status) {
             throw new IntegrationException('restaurantops_location_inactive', 'The selected location is inactive.', 422);
         }
-        $this->assertCurrentStorefrontLocation($context->locationId);
+        $this->assertCurrentStorefrontLocation($context);
 
         $menu = Menu::query()->with(['special', 'locations', 'menu_options.menu_option_values.option_value'])->find((int) $input['menu_id']);
         if (! $menu || ! $menu->menu_status) {
@@ -129,8 +130,15 @@ final class MenuSelectionResolver
         }
     }
 
-    private function assertCurrentStorefrontLocation(int $locationId): void
+    private function assertCurrentStorefrontLocation(Context $context): void
     {
+        if ($context->channel === 'pos') {
+            $currentId = app(LocationContextContract::class)->currentId();
+            if ((int) $currentId === $context->locationId) {
+                return;
+            }
+        }
+
         try {
             $currentId = app('location')->getId();
         } catch (\Throwable) {
@@ -139,7 +147,7 @@ final class MenuSelectionResolver
         if (! $currentId) {
             throw new IntegrationException('restaurantops_location_required', 'Select a storefront location before using enhanced ordering.');
         }
-        if ((int) $currentId !== $locationId) {
+        if ((int) $currentId !== $context->locationId) {
             throw new IntegrationException('restaurantops_location_forbidden', 'The request location does not match the active storefront location.', 403);
         }
     }

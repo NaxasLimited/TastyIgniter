@@ -59,6 +59,16 @@ class ExtendDashboardCards
                 'icon' => ' text-success fa fa-4x fa-shopping-bag',
                 'valueFrom' => $this->getValue(...),
             ],
+            'dine_in_order' => [
+                'label' => 'lang:igniter.cart::default.dashboard.text_total_dine_in_order',
+                'icon' => ' text-info fa fa-4x fa-utensils',
+                'valueFrom' => $this->getValue(...),
+            ],
+            'dine_in_order_count' => [
+                'label' => 'lang:igniter.cart::default.dashboard.text_dine_in_order_count',
+                'icon' => ' text-info fa fa-4x fa-utensils',
+                'valueFrom' => $this->getValue(...),
+            ],
             'completed_order' => [
                 'label' => 'lang:igniter.cart::default.dashboard.text_total_completed_order',
                 'icon' => ' text-success fa fa-4x fa-receipt',
@@ -94,6 +104,8 @@ class ExtendDashboardCards
             'delivery_order_count' => $this->getDeliveryOrderCount($callback),
             'collection_order' => $this->getTotalCollectionOrderSum($callback),
             'collection_order_count' => $this->getCollectionOrderCount($callback),
+            'dine_in_order' => $this->getTotalDineInOrderSum($callback),
+            'dine_in_order_count' => $this->getDineInOrderCount($callback),
             'completed_order' => $this->getTotalCompletedOrderSum($callback),
             'completed_order_count' => $this->getCompletedOrderCount($callback),
             'canceled_order_total' => $this->getTotalCanceledOrderSum($callback),
@@ -252,6 +264,34 @@ class ExtendDashboardCards
                 $query->where('order_type', '2');
                 $query->orWhere('order_type', 'collection');
             });
+
+        $callback($query);
+
+        return $query->count();
+    }
+
+    /**
+     * Return the total amount of dine-in orders
+     */
+    protected function getTotalDineInOrderSum(callable $callback): string
+    {
+        $query = Order::query();
+        $query->whereIn('status_id', Settings::get('completed_order_status') ?? [])
+            ->where('order_type', Order::DINE_IN);
+
+        $callback($query);
+
+        return currency_format($query->sum('order_total'));
+    }
+
+    /**
+     * Return the total number of dine-in orders
+     */
+    protected function getDineInOrderCount(callable $callback): int
+    {
+        $query = Order::query();
+        $query->whereIn('status_id', Settings::get('completed_order_status') ?? [])
+            ->where('order_type', Order::DINE_IN);
 
         $callback($query);
 

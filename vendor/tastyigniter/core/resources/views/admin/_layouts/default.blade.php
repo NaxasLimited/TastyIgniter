@@ -21,6 +21,8 @@
 
     @themeStyles
 
+    <link rel="stylesheet" type="text/css" href="{{ asset('vendor/igniter/css/app.css') }}?local=1">
+
     {{Template::renderHook('endStyles')}}
 
     {{Template::renderHook('endHead')}}
@@ -72,6 +74,8 @@
 {!! Assets::getJsVars() !!}
 
 {{Template::renderHook('startScripts')}}
+
+<script charset="{{ strtolower((string)setting('charset', 'UTF-8')) }}" type="text/javascript" src="{{ asset('vendor/igniter/js/app.js') }}?local=1" data-navigate-once="true"></script>
 
 @themeScripts
 

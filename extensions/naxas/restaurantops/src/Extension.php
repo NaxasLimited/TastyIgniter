@@ -7,7 +7,9 @@ namespace Naxas\RestaurantOps;
 use App\Services\LocationContext;
 use Igniter\Cart\Models\Menu;
 use Igniter\Cart\Models\OrderMenu;
+use Igniter\Admin\Http\Controllers\Dashboard;
 use Igniter\System\Classes\BaseExtension;
+use Illuminate\Support\Facades\Event;
 use Naxas\RestaurantOps\Console\InstallCommand;
 use Naxas\RestaurantOps\Console\SyncRolesCommand;
 use Naxas\RestaurantOps\Console\UpgradeCommand;
@@ -18,6 +20,7 @@ use Naxas\RestaurantOps\Console\VerifyPosCommand;
 use Naxas\RestaurantOps\Console\VerifyShiftsCommand;
 use Naxas\RestaurantOps\Contracts\AuditLogger;
 use Naxas\RestaurantOps\Contracts\LocationContextContract;
+use Naxas\RestaurantOps\Dashboard\RestaurantOpsDashboardCards;
 use Naxas\RestaurantOps\Http\Middleware\RequiresOperationalPermission;
 use Naxas\RestaurantOps\Http\Middleware\RequiresTransactionalLocation;
 use Naxas\RestaurantOps\Integrations\ActivityLogAdapter;
@@ -63,6 +66,42 @@ class Extension extends BaseExtension
         OrderMenu::extend(function (OrderMenu $model): void {
             $model->relation['hasOne']['restaurant_ops_snapshot'] = [OrderItemSnapshot::class, 'foreignKey' => 'order_menu_id'];
         });
+
+        resolve(RestaurantOpsDashboardCards::class)->registerCards();
+
+        Event::listen('admin.controller.beforeRemap', function ($controller): void {
+            if (! $controller instanceof Dashboard) {
+                return;
+            }
+
+            $controller->containerConfig['defaultWidgets'] = $this->restaurantOpsDashboardWidgets()
+                + ((array)($controller->containerConfig['defaultWidgets'] ?? []) ?: $this->coreDashboardWidgets());
+        });
+    }
+
+    private function coreDashboardWidgets(): array
+    {
+        return [
+            'onboarding' => ['priority' => 1, 'width' => '12'],
+            'reports' => ['widget' => 'charts', 'priority' => 20, 'width' => '6'],
+            'news' => ['priority' => 21, 'width' => '6'],
+            'order_stats' => ['widget' => 'stats', 'priority' => 30, 'card' => 'sale', 'width' => '4'],
+            'reservation_stats' => ['widget' => 'stats', 'priority' => 31, 'card' => 'lost_sale', 'width' => '4'],
+            'customer_stats' => ['widget' => 'stats', 'priority' => 32, 'card' => 'cash_payment', 'width' => '4'],
+        ];
+    }
+
+    private function restaurantOpsDashboardWidgets(): array
+    {
+        return [
+            'rops_today_sales' => ['widget' => 'stats', 'priority' => 5, 'card' => 'rops_today_sales', 'width' => '3'],
+            'rops_active_dine_in' => ['widget' => 'stats', 'priority' => 6, 'card' => 'rops_active_dine_in', 'width' => '3'],
+            'rops_unpaid_orders' => ['widget' => 'stats', 'priority' => 7, 'card' => 'rops_unpaid_orders', 'width' => '3'],
+            'rops_paid_cash_today' => ['widget' => 'stats', 'priority' => 8, 'card' => 'rops_paid_cash_today', 'width' => '3'],
+            'rops_paid_bkash_today' => ['widget' => 'stats', 'priority' => 9, 'card' => 'rops_paid_bkash_today', 'width' => '3'],
+            'rops_paid_nagad_today' => ['widget' => 'stats', 'priority' => 10, 'card' => 'rops_paid_nagad_today', 'width' => '3'],
+            'rops_paid_card_today' => ['widget' => 'stats', 'priority' => 11, 'card' => 'rops_paid_card_today', 'width' => '3'],
+        ];
     }
 
     #[Override]
@@ -122,6 +161,7 @@ class Extension extends BaseExtension
                     'restaurant-ops-shifts' => ['priority' => 80, 'class' => 'restaurant-ops-shifts', 'title' => lang('Naxas.RestaurantOps::default.navigation.shifts'), 'href' => route('naxas.restaurantops.shifts.index'), 'permission' => 'Restaurant.Shifts.Access'],
                     'restaurant-ops-active-shift' => ['priority' => 81, 'class' => 'restaurant-ops-active-shift', 'title' => lang('Naxas.RestaurantOps::default.navigation.active_shift'), 'href' => route('naxas.restaurantops.shifts.mine'), 'permission' => 'Restaurant.Shifts.ViewOwn'],
                     'restaurant-ops-shift-review' => ['priority' => 82, 'class' => 'restaurant-ops-shift-review', 'title' => lang('Naxas.RestaurantOps::default.navigation.shift_review'), 'href' => route('naxas.restaurantops.shifts.branch-review'), 'permission' => 'Restaurant.Shifts.ViewBranch'],
+                    'restaurant-ops-reports' => ['priority' => 90, 'class' => 'restaurant-ops-reports', 'title' => lang('Naxas.RestaurantOps::default.navigation.reports'), 'href' => route('naxas.restaurantops.reports.index'), 'permission' => 'Restaurant.Reports.BranchSales'],
                 ],
             ],
         ];

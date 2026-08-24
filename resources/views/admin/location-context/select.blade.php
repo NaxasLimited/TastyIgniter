@@ -24,6 +24,7 @@
             </div>
             <form method="post" action="{{ route('naxas.restaurantops.location-context.switch') }}">@csrf
                 <input type="hidden" name="location_id" value="{{ $location->getKey() }}">
+                <input type="hidden" name="redirect" value="{{ $redirect }}">
                 <button type="submit" @disabled(!$location->location_status && !$canSelectInactive)>{{ optional($activeLocation)->getKey() === $location->getKey() ? 'Current branch' : 'Select' }}</button>
             </form>
         </section>
@@ -32,6 +33,7 @@
     @endforelse
     @if($canViewAll)
         <form class="global" method="post" action="{{ route('naxas.restaurantops.location-context.global') }}">@csrf
+            <input type="hidden" name="redirect" value="{{ $redirect }}">
             <button type="submit">Use all locations (reporting)</button>
         </form>
     @endif

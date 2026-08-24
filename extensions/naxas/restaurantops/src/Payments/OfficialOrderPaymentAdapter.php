@@ -6,6 +6,7 @@ namespace Naxas\RestaurantOps\Payments;
 
 use Igniter\Cart\Models\Order;
 use Igniter\PayRegister\Models\Payment;
+use Igniter\System\Models\Settings;
 use Naxas\RestaurantOps\Models\PosPayment;
 use Naxas\RestaurantOps\Payments\Contracts\OfficialPaymentAdapter;
 use Naxas\RestaurantOps\Payments\Exceptions\PaymentException;
@@ -31,12 +32,21 @@ final class OfficialOrderPaymentAdapter implements OfficialPaymentAdapter
         if (! $method) {
             throw new PaymentException('payment_official_method_unavailable', 'Configured official offline payment method is unavailable.');
         } $reference = 'POS-'.$payment->getKey();
+        if (trim((string) $order->email) === '') {
+            $order->email = 'pos-guest@example.test';
+        }
+        if (trim((string) $order->telephone) === '') {
+            $order->telephone = '0000000000';
+        }
         $order->payment = $method->code;
         $order->saveQuietly();
         $order->logPaymentAttempt('RestaurantOps POS settlement', true, ['reference' => $reference], $safeSummary, false);
         if (! $order->markAsPaymentProcessed()) {
             throw new PaymentException('payment_official_sync_failed', 'Official payment processing failed.');
-        } $order->updateOrderStatus(null, ['comment' => 'POS payment '.$reference, 'notify' => false]);
+        }
+
+        $completedStatus = collect(Settings::get('completed_order_status') ?? [])->first();
+        $order->updateOrderStatus($completedStatus ?: null, ['comment' => 'POS payment '.$reference, 'notify' => false]);
 
         return $reference;
     }
