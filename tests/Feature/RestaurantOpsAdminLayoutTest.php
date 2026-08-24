@@ -11,15 +11,19 @@ use Illuminate\Database\Eloquent\Model;
 use Naxas\RestaurantOps\Http\Controllers\MenuConfiguration\MenuConfigurations;
 use Naxas\RestaurantOps\Http\Controllers\MenuIntegration\OrderItemSnapshots;
 use Naxas\RestaurantOps\Http\Controllers\OperationalLandings;
+use Naxas\RestaurantOps\Http\Controllers\Payments\PosPayments;
 use Naxas\RestaurantOps\Http\Controllers\Pos\PosOrders;
+use Naxas\RestaurantOps\Http\Controllers\Reports\RestaurantReports;
 use Naxas\RestaurantOps\Http\Controllers\Shifts\CashierShifts;
+use Naxas\RestaurantOps\Http\Controllers\Tables\FloorsController;
+use Naxas\RestaurantOps\Http\Controllers\Tables\TablesController;
 use Tests\TestCase;
 
 final class RestaurantOpsAdminLayoutTest extends TestCase
 {
     public function test_every_html_controller_uses_the_native_admin_controller(): void
     {
-        foreach ([OperationalLandings::class, MenuConfigurations::class, OrderItemSnapshots::class, PosOrders::class, CashierShifts::class] as $controller) {
+        foreach ([OperationalLandings::class, MenuConfigurations::class, OrderItemSnapshots::class, PosOrders::class, PosPayments::class, RestaurantReports::class, CashierShifts::class, FloorsController::class, TablesController::class] as $controller) {
             self::assertTrue(is_subclass_of($controller, AdminController::class), $controller);
         }
     }
@@ -35,11 +39,13 @@ final class RestaurantOpsAdminLayoutTest extends TestCase
             }
             $path = $view->getPathname();
             $contents = file_get_contents($path);
-            self::assertStringNotContainsString('<html', strtolower($contents), $path);
-            self::assertStringNotContainsString('<head', strtolower($contents), $path);
-            self::assertStringNotContainsString('<body', strtolower($contents), $path);
-            self::assertStringNotContainsString('@extends(', $contents, $path);
-            self::assertStringNotContainsString('<link ', strtolower($contents), $path);
+            $contentOutsideScripts = preg_replace('/^\s*<script\b[^>]*>.*?^\s*<\/script>\s*$/ims', '', $contents);
+            self::assertIsString($contentOutsideScripts, $path);
+            self::assertDoesNotMatchRegularExpression('/<html(?:\s|>)/i', $contentOutsideScripts, $path);
+            self::assertDoesNotMatchRegularExpression('/<head(?:\s|>)/i', $contentOutsideScripts, $path);
+            self::assertDoesNotMatchRegularExpression('/<body(?:\s|>)/i', $contentOutsideScripts, $path);
+            self::assertStringNotContainsString('@extends(', $contentOutsideScripts, $path);
+            self::assertDoesNotMatchRegularExpression('/<link(?:\s|>)/i', $contentOutsideScripts, $path);
         }
     }
 

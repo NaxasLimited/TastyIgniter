@@ -34,13 +34,13 @@ final class RestaurantOpsMySqlIntegrationTest extends TestCase
         }
         $prefix = DB::connection()->getTablePrefix();
         $database = DB::connection()->getDatabaseName();
-        $money = DB::select("select table_name, column_name, column_type from information_schema.columns where table_schema = ? and table_name like ? and column_name in ('price_value','price_adjustment','price_override','upgrade_surcharge','total_price')", [$database, $prefix.'naxas_restaurant_ops_%']);
+        $money = DB::select("select table_name as table_name_value, column_name as column_name_value, column_type as column_type_value from information_schema.columns where table_schema = ? and table_name like ? and column_name in ('price_value','price_adjustment','price_override','upgrade_surcharge','total_price')", [$database, $prefix.'naxas_restaurant_ops_%']);
         self::assertNotEmpty($money);
         foreach ($money as $column) {
-            self::assertSame('decimal(15,4)', strtolower($column->column_type));
+            self::assertSame('decimal(15,4)', strtolower($column->column_type_value));
         }
         $indexes = DB::select('show index from `'.$prefix.'naxas_restaurant_ops_order_item_snapshots`');
-        self::assertNotEmpty(array_filter($indexes, fn (object $index): bool => $index->Key_name === 'naxas_ops_snapshot_order_menu_unique' && (int) $index->Non_unique === 0));
+        self::assertNotEmpty(array_filter($indexes, fn (object $index): bool => $index->Key_name === 'rops_snapshot_order_menu_unique' && (int) $index->Non_unique === 0));
         self::assertStringContainsString('InnoDB', DB::selectOne('show create table `'.$prefix.'naxas_restaurant_ops_order_item_snapshots`')->{'Create Table'});
     }
 }

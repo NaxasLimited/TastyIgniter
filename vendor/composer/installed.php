@@ -3,7 +3,7 @@
         'name' => 'tastyigniter/tastyigniter',
         'pretty_version' => '4.x-dev',
         'version' => '4.9999999.9999999.9999999-dev',
-        'reference' => '3130630cd0c512412f90dd2a4aa177f1e53535e6',
+        'reference' => 'bf975bfc88dad5e88d8533c7b31e2277733d14f4',
         'type' => 'project',
         'install_path' => __DIR__ . '/../../',
         'aliases' => array(),
@@ -1961,7 +1961,7 @@
         'tastyigniter/tastyigniter' => array(
             'pretty_version' => '4.x-dev',
             'version' => '4.9999999.9999999.9999999-dev',
-            'reference' => '3130630cd0c512412f90dd2a4aa177f1e53535e6',
+            'reference' => 'bf975bfc88dad5e88d8533c7b31e2277733d14f4',
             'type' => 'project',
             'install_path' => __DIR__ . '/../../',
             'aliases' => array(),

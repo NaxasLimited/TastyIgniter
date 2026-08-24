@@ -39,7 +39,7 @@ class StrictMysqlTimestampPatchTest extends TestCase
     {
         $this->assertStringContainsString('Schema::hasTable($table)', $this->patch);
         $this->assertStringContainsString('Schema::hasColumn($table, $column)', $this->patch);
-        $this->assertStringContainsString('Schema::hasColumn($table, $oldColumn)', $this->patch);
+        $this->assertStringContainsString('Schema::hasColumn($table, $legacyColumn)', $this->patch);
         $this->assertStringContainsString('Schema::hasColumn($table, $newColumn)', $this->patch);
         $this->assertStringContainsString('both [%s] and [%s] exist', $this->patch);
     }
@@ -47,7 +47,8 @@ class StrictMysqlTimestampPatchTest extends TestCase
     public function test_all_resulting_definitions_are_nullable_without_zero_dates(): void
     {
         $this->assertStringContainsString('TIMESTAMP NULL DEFAULT NULL', $this->patch);
-        $this->assertStringContainsString('->nullable()->default(null)', $this->patch);
+        $this->assertStringContainsString('ALTER TABLE {$qualifiedTable} ADD {$quotedColumn}', $this->patch);
+        $this->assertStringContainsString('ALTER TABLE {$qualifiedTable} MODIFY {$quotedColumn}', $this->patch);
         $this->assertStringNotContainsString("DEFAULT '0000-00-00 00:00:00'", $this->patch);
     }
 

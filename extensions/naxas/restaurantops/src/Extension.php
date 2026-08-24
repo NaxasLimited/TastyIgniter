@@ -8,6 +8,7 @@ use App\Services\LocationContext;
 use Igniter\Cart\Models\Menu;
 use Igniter\Cart\Models\OrderMenu;
 use Igniter\Admin\Http\Controllers\Dashboard;
+use Igniter\Admin\Facades\Template;
 use Igniter\System\Classes\BaseExtension;
 use Illuminate\Support\Facades\Event;
 use Naxas\RestaurantOps\Console\InstallCommand;
@@ -59,6 +60,15 @@ class Extension extends BaseExtension
     #[Override]
     public function boot(): void
     {
+        Template::registerHook('endStyles', fn(): string => sprintf(
+            '<link rel="stylesheet" type="text/css" href="%s" data-navigate-once="true">',
+            e(asset('vendor/naxas-restaurantops/css/app.css')),
+        ));
+        Template::registerHook('endScripts', fn(): string => sprintf(
+            '<script type="text/javascript" src="%s" data-navigate-once="true"></script>',
+            e(asset('vendor/naxas-restaurantops/js/app.js')),
+        ));
+
         Menu::extend(function (Menu $model): void {
             $model->relation['hasMany']['restaurant_ops_variants'] = [ItemVariant::class, 'foreignKey' => 'menu_id'];
             $model->relation['hasOne']['restaurant_ops_metadata'] = [MenuItemMetadata::class, 'foreignKey' => 'menu_id'];

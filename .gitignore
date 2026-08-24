@@ -10,9 +10,11 @@ auth.json
 # /vendor
 # composer.lock
 node_modules
+.playwright-cli/
 
 /public/vendor
 /public/storage
+/public/mix-manifest.json
 
 /storage/clockwork
 /_ide_helper.php
