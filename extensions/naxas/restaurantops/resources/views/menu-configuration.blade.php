@@ -45,7 +45,7 @@
                         </div>
                         <div class="col-md-2">
                             <label class="form-label">Price</label>
-                            <input name="price_value" class="form-control" inputmode="decimal" placeholder="0.00" required>
+                            <input name="price_value" class="form-control" inputmode="decimal" placeholder="0.00" value="{{ number_format((float) $menu->menu_price, 2, '.', '') }}" required>
                         </div>
                         <div class="col-md-1">
                             <label class="form-label">Order</label>
@@ -53,7 +53,7 @@
                         </div>
                         <div class="col-md-2">
                             <label class="d-flex align-items-center gap-2 mb-2">
-                                <input name="is_default" type="checkbox" value="1"> Default
+                                <input name="is_default" type="checkbox" value="1" {{ $variants->isEmpty() ? 'checked' : '' }}> Default
                             </label>
                             <label class="d-flex align-items-center gap-2">
                                 <input name="is_active" type="checkbox" value="1" checked> Active
@@ -197,7 +197,9 @@
         form.elements.id.value = '';
         form.elements.version.value = '';
         form.elements.price_mode.value = 'absolute';
+        form.elements.price_value.value = '{{ number_format((float) $menu->menu_price, 2, '.', '') }}';
         form.elements.display_order.value = '0';
+        form.elements.is_default.checked = {{ $variants->isEmpty() ? 'true' : 'false' }};
         form.elements.is_active.checked = true;
     };
     const optionRow = (name = '', price = '0.00', stock = '', isDefault = false) => {
@@ -206,7 +208,7 @@
         wrapper.innerHTML = `
             <div class="col-md-4">
                 <label class="form-label">Choice</label>
-                <input data-option-value-name class="form-control" placeholder="250ml / No ice" value="${name}">
+                <input data-option-value-name class="form-control" placeholder="No ice / Extra cheese" value="${name}">
             </div>
             <div class="col-md-3">
                 <label class="form-label">Price</label>

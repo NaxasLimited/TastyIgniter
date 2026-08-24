@@ -18,6 +18,7 @@ use Naxas\RestaurantOps\Contracts\LocationContextContract;
 use Naxas\RestaurantOps\Http\Controllers\AdminPageController;
 use Naxas\RestaurantOps\Models\Combo;
 use Naxas\RestaurantOps\Models\ItemVariant;
+use Naxas\RestaurantOps\Models\MenuItemMetadata;
 use Naxas\RestaurantOps\Models\MenuModifierGroup;
 use Naxas\RestaurantOps\Models\ModifierMetadata;
 use Naxas\RestaurantOps\Models\ModifierGroup;
@@ -39,6 +40,9 @@ final class MenuConfigurations extends AdminPageController
     public function index(string $menuId): string
     {
         $menu = Menu::query()->with(['menu_options.option', 'menu_options.menu_option_values.option_value'])->findOrFail($menuId);
+        $this->ensureMenuMetadata($menu);
+        $this->ensureDefaultVariant($menu);
+        $menu->load('restaurant_ops_metadata');
         $officialOptions = $menu->menu_options->sortBy('priority')->values();
 
         return $this->renderAdminPage('Naxas.RestaurantOps::menu-configuration', ['menu' => $menu, 'variants' => ItemVariant::query()->where('menu_id', $menu->getKey())->orderBy('display_order')->get(), 'groups' => MenuModifierGroup::query()->where('menu_id', $menu->getKey())->orderBy('display_order')->get(), 'sharedGroups' => ModifierGroup::query()->where('is_active', true)->orderBy('display_order')->get(), 'officialOptions' => $officialOptions, 'combo' => Combo::query()->where('menu_id', $menu->getKey())->first()], lang('Naxas.RestaurantOps::default.navigation.menu_configuration'), 'restaurant-ops-menu-config');
@@ -49,10 +53,17 @@ final class MenuConfigurations extends AdminPageController
         $menu = Menu::query()->findOrFail($menuId);
         $data = request()->validate(['id' => ['nullable', 'integer'], 'code' => ['required', 'alpha_dash', 'max:64'], 'name' => ['required', 'string', 'max:255'], 'kitchen_name' => ['nullable', 'string', 'max:255'], 'price_mode' => ['required', 'in:adjustment,absolute'], 'price_value' => ['required', 'decimal:0,4', 'min:-9999999999'], 'is_default' => ['required', 'boolean'], 'is_active' => ['required', 'boolean'], 'display_order' => ['nullable', 'integer', 'min:0'], 'version' => ['nullable', 'integer', 'min:1']]);
         $variant = DB::transaction(function () use ($data, $menu): ItemVariant {
+            $this->ensureMenuMetadata($menu);
             $variant = isset($data['id']) ? ItemVariant::query()->where('menu_id', $menu->getKey())->findOrFail($data['id']) : new ItemVariant(['menu_id' => $menu->getKey()]);
             if ($variant->exists && isset($data['version']) && (int) $variant->version !== (int) $data['version']) {
                 abort(409, 'Menu configuration changed; refresh before saving.');
             }
+            $hasDefault = ItemVariant::query()
+                ->where('menu_id', $menu->getKey())
+                ->when($variant->exists, fn ($q) => $q->whereKeyNot($variant->getKey()))
+                ->where('is_default', true)
+                ->exists();
+            $data['is_default'] = (bool) $data['is_default'] || ! $hasDefault;
             if ($data['is_default']) {
                 ItemVariant::query()->where('menu_id', $menu->getKey())->when($variant->exists, fn ($q) => $q->whereKeyNot($variant->getKey()))->update(['is_default' => false]);
             }
@@ -96,6 +107,8 @@ final class MenuConfigurations extends AdminPageController
         ]);
 
         $summary = DB::transaction(function () use ($menu, $data): array {
+            $this->ensureMenuMetadata($menu);
+            $this->ensureDefaultVariant($menu);
             $locationId = app(LocationContextContract::class)->currentId();
             $isSingle = in_array($data['display_type'], ['radio', 'select'], true);
             $min = (int) ($data['min_selected'] ?? ($data['is_required'] ? 1 : 0));
@@ -246,5 +259,57 @@ final class MenuConfigurations extends AdminPageController
     private function uniqueCode(string $prefix, string $label): string
     {
         return Str::limit($prefix.'-'.Str::slug($label), 64, '');
+    }
+
+    private function ensureMenuMetadata(Menu $menu): MenuItemMetadata
+    {
+        return MenuItemMetadata::query()->firstOrCreate(
+            ['menu_id' => $menu->getKey()],
+            [
+                'kitchen_name' => $menu->menu_name,
+                'storefront_visible' => true,
+                'pos_visible' => true,
+                'waiter_visible' => true,
+                'show_on_kitchen' => true,
+                'version' => 1,
+            ],
+        );
+    }
+
+    private function ensureDefaultVariant(Menu $menu): ItemVariant
+    {
+        $existing = ItemVariant::query()
+            ->where('menu_id', $menu->getKey())
+            ->whereNull('archived_at')
+            ->orderByDesc('is_default')
+            ->orderBy('display_order')
+            ->first();
+
+        if ($existing) {
+            if (! $existing->is_default) {
+                $existing->forceFill(['is_default' => true, 'is_active' => true, 'version' => $existing->version + 1])->save();
+            }
+
+            return $existing;
+        }
+
+        return ItemVariant::query()->create([
+            'menu_id' => $menu->getKey(),
+            'code' => 'regular',
+            'name' => 'Regular',
+            'kitchen_name' => $menu->menu_name,
+            'price_mode' => 'absolute',
+            'price_value' => $menu->menu_price,
+            'is_default' => true,
+            'is_active' => true,
+            'display_order' => 0,
+            'storefront_visible' => true,
+            'pos_visible' => true,
+            'online_visible' => true,
+            'delivery_visible' => true,
+            'collection_visible' => true,
+            'dine_in_visible' => true,
+            'version' => 1,
+        ]);
     }
 }
