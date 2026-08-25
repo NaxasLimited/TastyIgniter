@@ -13,7 +13,7 @@ FROM serversideup/php:8.4-cli AS vendor
 
 USER root
 
-RUN install-php-extensions bcmath gd intl pdo_mysql zip
+RUN install-php-extensions bcmath exif gd intl pdo_mysql zip
 
 WORKDIR /app
 
@@ -30,7 +30,7 @@ FROM serversideup/php:8.4-fpm-nginx
 
 USER root
 
-RUN install-php-extensions bcmath gd intl pdo_mysql zip
+RUN install-php-extensions bcmath exif gd intl pdo_mysql zip
 
 WORKDIR /var/www/html
 
