@@ -380,14 +380,34 @@ final class PosOrders extends AdminPageController
 
     private function orderList(string $status, string $title): Response
     {
+        $statuses = $status === 'held'
+            ? ['held']
+            : ['draft', 'active', 'kitchen_pending', 'payment_pending'];
+
         $orders = PosOrder::with('items')
-            ->where('location_id', app(LocationContextContract::class)->currentId())
-            ->where('status', $status)
-            ->latest()
+            ->select('naxas_restaurant_ops_pos_orders.*')
+            ->selectRaw('official.order_id as official_order_id, official.status_id as official_status_id, official_status.status_name as official_status_name, official.processed as official_processed, official.payment as official_payment')
+            ->selectRaw('payment.receipt_number, payment.status as payment_status, payment.paid_at')
+            ->selectRaw('COALESCE(NULLIF(waiter.name, ""), waiter.username) as waiter_name, COALESCE(NULLIF(cashier.name, ""), cashier.username) as cashier_name')
+            ->selectRaw('session.guest_count as session_guest_count, table_info.table_number, table_info.name as table_name, floor.name as floor_name')
+            ->leftJoin('orders as official', 'official.order_id', '=', 'naxas_restaurant_ops_pos_orders.order_id')
+            ->leftJoin('statuses as official_status', 'official_status.status_id', '=', 'official.status_id')
+            ->leftJoin('naxas_restaurant_ops_pos_payments as payment', function ($join): void {
+                $join->on('payment.pos_order_id', '=', 'naxas_restaurant_ops_pos_orders.id')
+                    ->where('payment.status', '=', 'paid');
+            })
+            ->leftJoin('admin_users as waiter', 'waiter.user_id', '=', 'naxas_restaurant_ops_pos_orders.waiter_id')
+            ->leftJoin('admin_users as cashier', 'cashier.user_id', '=', 'naxas_restaurant_ops_pos_orders.cashier_id')
+            ->leftJoin('naxas_restaurant_ops_table_sessions as session', 'session.id', '=', 'naxas_restaurant_ops_pos_orders.table_session_id')
+            ->leftJoin('naxas_restaurant_ops_tables as table_info', 'table_info.id', '=', 'session.active_table_id')
+            ->leftJoin('naxas_restaurant_ops_floors as floor', 'floor.id', '=', 'table_info.floor_id')
+            ->where('naxas_restaurant_ops_pos_orders.location_id', app(LocationContextContract::class)->currentId())
+            ->whereIn('naxas_restaurant_ops_pos_orders.status', $statuses)
+            ->orderByDesc('naxas_restaurant_ops_pos_orders.created_at')
             ->paginate(30);
 
         $menuItem = $status === 'held' ? 'restaurant-ops-pos-held' : 'restaurant-ops-pos-active';
 
-        return response($this->renderAdminPage('Naxas.RestaurantOps::pos.orders', compact('orders', 'status', 'title'), $title, $menuItem));
+        return response($this->renderAdminPage('Naxas.RestaurantOps::pos.orders', compact('orders', 'status', 'title', 'statuses'), $title, $menuItem));
     }
 }

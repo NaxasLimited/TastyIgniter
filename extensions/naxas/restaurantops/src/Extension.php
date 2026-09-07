@@ -5,12 +5,15 @@ declare(strict_types=1);
 namespace Naxas\RestaurantOps;
 
 use App\Services\LocationContext;
+use Igniter\Cart\Http\Controllers\Orders as OrdersController;
 use Igniter\Cart\Models\Menu;
 use Igniter\Cart\Models\OrderMenu;
 use Igniter\Admin\Http\Controllers\Dashboard;
 use Igniter\Admin\Facades\Template;
 use Igniter\System\Classes\BaseExtension;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Schema;
 use Naxas\RestaurantOps\Console\InstallCommand;
 use Naxas\RestaurantOps\Console\SyncRolesCommand;
 use Naxas\RestaurantOps\Console\UpgradeCommand;
@@ -76,6 +79,7 @@ class Extension extends BaseExtension
         OrderMenu::extend(function (OrderMenu $model): void {
             $model->relation['hasOne']['restaurant_ops_snapshot'] = [OrderItemSnapshot::class, 'foreignKey' => 'order_menu_id'];
         });
+        $this->extendOfficialOrders();
 
         resolve(RestaurantOpsDashboardCards::class)->registerCards();
 
@@ -112,6 +116,101 @@ class Extension extends BaseExtension
             'rops_paid_nagad_today' => ['widget' => 'stats', 'priority' => 10, 'card' => 'rops_paid_nagad_today', 'width' => '3'],
             'rops_paid_card_today' => ['widget' => 'stats', 'priority' => 11, 'card' => 'rops_paid_card_today', 'width' => '3'],
         ];
+    }
+
+    private function extendOfficialOrders(): void
+    {
+        OrdersController::extendListQuery(function ($widget, $query): void {
+            if (! Schema::hasTable('naxas_restaurant_ops_pos_orders')) {
+                return;
+            }
+
+            $query->select('orders.*')->addSelect([
+                'rops_pos_id' => DB::table('naxas_restaurant_ops_pos_orders as pos')
+                    ->select('pos.id')
+                    ->whereColumn('pos.order_id', 'orders.order_id')
+                    ->latest('pos.id')
+                    ->limit(1),
+                'rops_pos_status' => DB::table('naxas_restaurant_ops_pos_orders as pos')
+                    ->select('pos.status')
+                    ->whereColumn('pos.order_id', 'orders.order_id')
+                    ->latest('pos.id')
+                    ->limit(1),
+                'rops_pos_service_type' => DB::table('naxas_restaurant_ops_pos_orders as pos')
+                    ->select('pos.service_type')
+                    ->whereColumn('pos.order_id', 'orders.order_id')
+                    ->latest('pos.id')
+                    ->limit(1),
+                'rops_pos_table' => DB::table('naxas_restaurant_ops_pos_orders as pos')
+                    ->leftJoin('naxas_restaurant_ops_table_sessions as session', 'session.id', '=', 'pos.table_session_id')
+                    ->leftJoin('naxas_restaurant_ops_tables as table', function ($join) {
+                        $join->on('table.id', '=', DB::raw('COALESCE(session.active_table_id, session.table_id)'));
+                    })
+                    ->leftJoin('naxas_restaurant_ops_floors as floor', 'floor.id', '=', 'table.floor_id')
+                    ->selectRaw("TRIM(CONCAT(COALESCE(floor.name, ''), CASE WHEN floor.name IS NULL THEN '' ELSE ' / ' END, COALESCE(table.table_number, table.name, '')))")
+                    ->whereColumn('pos.order_id', 'orders.order_id')
+                    ->latest('pos.id')
+                    ->limit(1),
+                'rops_pos_waiter' => DB::table('naxas_restaurant_ops_pos_orders as pos')
+                    ->leftJoin('admin_users as waiter', 'waiter.user_id', '=', 'pos.waiter_id')
+                    ->selectRaw("COALESCE(waiter.name, waiter.username)")
+                    ->whereColumn('pos.order_id', 'orders.order_id')
+                    ->latest('pos.id')
+                    ->limit(1),
+                'rops_pos_shift' => DB::table('naxas_restaurant_ops_pos_orders as pos')
+                    ->select('pos.shift_id')
+                    ->whereColumn('pos.order_id', 'orders.order_id')
+                    ->latest('pos.id')
+                    ->limit(1),
+                'rops_pos_cashier' => DB::table('naxas_restaurant_ops_pos_orders as pos')
+                    ->leftJoin('naxas_restaurant_ops_pos_payments as payment', 'payment.pos_order_id', '=', 'pos.id')
+                    ->leftJoin('admin_users as cashier', 'cashier.user_id', '=', 'payment.cashier_staff_id')
+                    ->selectRaw("COALESCE(cashier.name, cashier.username)")
+                    ->whereColumn('pos.order_id', 'orders.order_id')
+                    ->latest('payment.id')
+                    ->limit(1),
+                'rops_pos_receipt' => DB::table('naxas_restaurant_ops_pos_orders as pos')
+                    ->leftJoin('naxas_restaurant_ops_pos_payments as payment', 'payment.pos_order_id', '=', 'pos.id')
+                    ->select('payment.receipt_number')
+                    ->whereColumn('pos.order_id', 'orders.order_id')
+                    ->latest('payment.id')
+                    ->limit(1),
+                'rops_pos_tender' => DB::table('naxas_restaurant_ops_pos_orders as pos')
+                    ->leftJoin('naxas_restaurant_ops_pos_payments as payment', 'payment.pos_order_id', '=', 'pos.id')
+                    ->leftJoin('naxas_restaurant_ops_pos_payment_tenders as tender', 'tender.pos_payment_id', '=', 'payment.id')
+                    ->selectRaw("GROUP_CONCAT(COALESCE(NULLIF(tender.provider_code, ''), tender.method) ORDER BY tender.id SEPARATOR ', ')")
+                    ->whereColumn('pos.order_id', 'orders.order_id')
+                    ->limit(1),
+            ]);
+        });
+
+        OrdersController::extendListColumns(function ($list): void {
+            $list->addColumns([
+                'rops_pos_context' => [
+                    'label' => 'POS context',
+                    'type' => 'partial',
+                    'path' => 'Naxas.RestaurantOps::orders.list_pos_context',
+                    'sortable' => false,
+                ],
+                'rops_pos_payment' => [
+                    'label' => 'POS payment',
+                    'type' => 'partial',
+                    'path' => 'Naxas.RestaurantOps::orders.list_pos_payment',
+                    'sortable' => false,
+                ],
+            ]);
+        });
+
+        OrdersController::extendFormFields(function ($form): void {
+            $form->addTabFields([
+                'restaurant_ops_pos_details' => [
+                    'tab' => 'Restaurant Ops',
+                    'type' => 'partial',
+                    'path' => 'Naxas.RestaurantOps::orders.pos_details',
+                    'context' => ['edit', 'preview'],
+                ],
+            ]);
+        });
     }
 
     #[Override]
