@@ -18,11 +18,13 @@ final class RoleSynchronizer
 
     public function sync(bool $dryRun = true, bool $createMissing = false, bool $addMissingPermissions = false, ?string $only = null): array
     {
-        $result = ['detected' => [], 'created' => [], 'updated' => [], 'conflicts' => [], 'missing permissions' => [], 'skipped' => []];
+        $result = ['detected' => [], 'created' => [], 'updated' => [], 'conflicts' => [], 'missing permissions' => [], 'skipped' => [], 'optional unavailable' => []];
         $profiles = RoleProfiles::all();
         $registered = collect($this->permissionManager->listPermissions())->pluck('code')->all();
         $referenced = collect($profiles)->pluck('permissions')->flatten()->unique()->all();
         $result['missing permissions'] = array_values(array_diff($referenced, $registered));
+        $optional = collect($profiles)->pluck('optional_permissions')->flatten()->filter()->unique()->all();
+        $result['optional unavailable'] = array_values(array_diff($optional, $registered));
 
         if ($result['missing permissions']) {
             $this->audit->info('restaurant_ops.role_sync_blocked', ['missing_permissions' => $result['missing permissions']]);
@@ -36,6 +38,10 @@ final class RoleSynchronizer
             }
 
             $result['detected'][] = $definition['code'];
+            $profilePermissions = array_values(array_unique(array_merge(
+                $definition['permissions'],
+                array_values(array_intersect($definition['optional_permissions'] ?? [], $registered)),
+            )));
             $role = UserRole::query()->where('code', $definition['code'])->first();
             if (! $role) {
                 if (! $createMissing || $dryRun) {
@@ -47,7 +53,7 @@ final class RoleSynchronizer
                 $role = UserRole::query()->create([
                     'name' => $definition['name'], 'code' => $definition['code'],
                     'description' => 'Standard Restaurant Operations role. Permissions may be customized.',
-                    'permissions' => array_fill_keys($definition['permissions'], 1),
+                    'permissions' => array_fill_keys($profilePermissions, 1),
                 ]);
                 $result['created'][] = $definition['code'];
                 $this->audit->info('restaurant_ops.role_created', ['role_id' => $role->getKey(), 'profile' => $profile]);
