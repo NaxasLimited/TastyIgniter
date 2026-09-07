@@ -34,8 +34,8 @@ final class RestaurantOpsPosMySqlTest extends TestCase
         self::assertSame('decimal(15,4)', strtolower($columns['order_total']->Type));
         self::assertSame('decimal(15,4)', strtolower($columns['outstanding_total']->Type));
         $indexes = collect(DB::select("SHOW INDEX FROM `{$prefix}naxas_restaurant_ops_pos_orders`"))->pluck('Key_name')->unique();
-        self::assertContains('naxas_ops_pos_official_unique', $indexes);
-        self::assertContains('naxas_ops_pos_location_status', $indexes);
-        self::assertContains('naxas_ops_pos_shift_status', $indexes);
+        self::assertContains('rops_pos_official_unique', $indexes);
+        self::assertContains('rops_pos_location_status', $indexes);
+        self::assertContains('rops_pos_shift_status', $indexes);
     }
 }

@@ -28,13 +28,13 @@ final class RestaurantOpsShiftMySqlTest extends TestCase
         $tables = ['naxas_restaurant_ops_cashier_shifts', 'naxas_restaurant_ops_cash_movements', 'naxas_restaurant_ops_shift_submissions', 'naxas_restaurant_ops_shift_denominations'];
         foreach ($tables as $table) self::assertTrue(Schema::hasTable($table), $table.' must be migrated');
         $database = DB::connection()->getDatabaseName();
-        $columns = DB::select("select table_name,column_name,column_type from information_schema.columns where table_schema=? and table_name like 'naxas_restaurant_ops_%' and column_name in ('opening_cash','expected_cash','counted_cash','variance','amount','denomination','total')", [$database]);
+        $columns = DB::select("select table_name as table_name_value, column_name as column_name_value, column_type as column_type_value from information_schema.columns where table_schema=? and table_name like 'naxas_restaurant_ops_%' and column_name in ('opening_cash','expected_cash','counted_cash','variance','amount','denomination','total')", [$database]);
         self::assertNotEmpty($columns);
-        foreach ($columns as $column) self::assertSame('decimal(15,4)', strtolower($column->column_type));
+        foreach ($columns as $column) self::assertSame('decimal(15,4)', strtolower($column->column_type_value));
         $indexes = DB::select('show index from naxas_restaurant_ops_cashier_shifts');
-        self::assertNotEmpty(array_filter($indexes, fn (object $index): bool => $index->Key_name === 'naxas_ops_shift_active_staff_unique' && (int)$index->Non_unique === 0));
+        self::assertNotEmpty(array_filter($indexes, fn (object $index): bool => $index->Key_name === 'rops_shift_active_staff_unique' && (int)$index->Non_unique === 0));
         self::assertStringContainsString('InnoDB', DB::selectOne('show create table naxas_restaurant_ops_cashier_shifts')->{'Create Table'});
         $submissionIndexes = DB::select('show index from naxas_restaurant_ops_shift_submissions');
-        self::assertNotEmpty(array_filter($submissionIndexes, fn (object $index): bool => $index->Key_name === 'naxas_ops_submission_revision_unique' && (int)$index->Non_unique === 0));
+        self::assertNotEmpty(array_filter($submissionIndexes, fn (object $index): bool => $index->Key_name === 'rops_submission_revision_unique' && (int)$index->Non_unique === 0));
     }
 }

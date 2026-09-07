@@ -13617,7 +13617,9 @@
                 "branch-alias": {
                     "dev-master": "4.x-dev"
                 },
-                "patches_applied": []
+                "patches_applied": {
+                    "Make timestamp migration strict-mode safe and idempotent": "patches/tastyigniter-core-strict-mysql-timestamps.patch"
+                }
             },
             "installation-source": "dist",
             "autoload": {
