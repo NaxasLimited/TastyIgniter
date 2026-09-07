@@ -73,6 +73,7 @@ final class RoleProfiles
                 'Restaurant.Waiter.Kitchen.Send', 'Restaurant.Waiter.Bill.Request', 'Restaurant.Waiter.Void.Request', 'Restaurant.Waiter.Discount.Request',
             ], 'optional_permissions' => ['Admin.Dashboard', 'Admin.Orders']],
             'kitchen' => self::PROFILES['kitchen'] + ['permissions' => [
+                'Admin.Dashboard',
                 'Restaurant.Operations.Access', 'Restaurant.LocationContext.Access', 'Restaurant.Kitchen.Access',
                 'Restaurant.Kitchen.Ticket.Accept', 'Restaurant.Kitchen.Ticket.Prepare', 'Restaurant.Kitchen.Ticket.Ready', 'Restaurant.Kitchen.Ticket.Complete',
             ]],
