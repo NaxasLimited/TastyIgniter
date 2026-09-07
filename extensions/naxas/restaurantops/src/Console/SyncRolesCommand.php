@@ -9,15 +9,28 @@ use Naxas\RestaurantOps\Services\RoleSynchronizer;
 
 final class SyncRolesCommand extends Command
 {
-    protected $signature = 'restaurant-ops:sync-roles {--dry-run : Preview without writing} {--create-missing : Create missing custom roles and add their missing catalog grants} {--add-missing-permissions : Add only missing catalog grants} {--group= : Limit to a profile or stable role code}';
+    protected $signature = 'restaurant-ops:sync-roles
+        {--dry-run : Preview without writing}
+        {--create-missing : Create missing custom roles and add their missing catalog grants}
+        {--add-missing-permissions : Add only missing catalog grants}
+        {--harden-legacy-manager : Convert the built-in Manager role into a branch-safe operations manager}
+        {--group= : Limit to a profile or stable role code}';
 
     protected $description = 'Preview or non-destructively synchronize standard Restaurant Operations roles';
 
     public function handle(RoleSynchronizer $synchronizer): int
     {
-        $writeRequested = (bool) $this->option('create-missing') || (bool) $this->option('add-missing-permissions');
+        $writeRequested = (bool) $this->option('create-missing')
+            || (bool) $this->option('add-missing-permissions')
+            || (bool) $this->option('harden-legacy-manager');
         $dryRun = (bool) $this->option('dry-run') || ! $writeRequested;
-        $result = $synchronizer->sync($dryRun, (bool) $this->option('create-missing'), (bool) $this->option('add-missing-permissions'), $this->option('group'));
+        $result = $synchronizer->sync(
+            $dryRun,
+            (bool) $this->option('create-missing'),
+            (bool) $this->option('add-missing-permissions'),
+            $this->option('group'),
+            (bool) $this->option('harden-legacy-manager'),
+        );
 
         $this->info($dryRun ? 'Restaurant Operations role sync preview' : 'Restaurant Operations role sync');
         foreach ($result as $label => $items) {

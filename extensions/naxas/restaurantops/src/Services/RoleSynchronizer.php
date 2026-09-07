@@ -16,7 +16,18 @@ final class RoleSynchronizer
         private readonly PermissionManager $permissionManager,
     ) {}
 
-    public function sync(bool $dryRun = true, bool $createMissing = false, bool $addMissingPermissions = false, ?string $only = null): array
+    private const LEGACY_MANAGER_DENIED_PERMISSIONS = [
+        'Admin.Locations',
+        'Admin.Payments',
+        'Admin.Staffs',
+        'Admin.StaffGroups',
+        'Admin.MediaManager',
+        'Site.Themes',
+        'System.Settings',
+        'System.Extensions',
+    ];
+
+    public function sync(bool $dryRun = true, bool $createMissing = false, bool $addMissingPermissions = false, ?string $only = null, bool $hardenLegacyManager = false): array
     {
         $result = ['detected' => [], 'created' => [], 'updated' => [], 'conflicts' => [], 'missing permissions' => [], 'skipped' => [], 'optional unavailable' => []];
         $profiles = RoleProfiles::all();
@@ -78,8 +89,49 @@ final class RoleSynchronizer
             $this->audit->info('restaurant_ops.role_permissions_added', ['role_id' => $role->getKey(), 'count' => count($missing)]);
         }
 
+        if ($hardenLegacyManager && (!$only || in_array($only, ['manager', 'legacy_manager'], true))) {
+            $this->hardenLegacyManager($profiles['branch_manager'], $registered, $dryRun, $result);
+        }
+
         $this->audit->info($dryRun ? 'restaurant_ops.role_sync_preview' : 'restaurant_ops.role_sync', array_map('count', $result));
 
         return $result;
+    }
+
+    private function hardenLegacyManager(array $branchManager, array $registered, bool $dryRun, array &$result): void
+    {
+        $role = UserRole::query()->where('code', 'manager')->first();
+        if (! $role) {
+            $result['skipped'][] = 'manager (missing)';
+
+            return;
+        }
+
+        $current = (array)$role->permissions;
+        $allowedAdditions = array_values(array_unique(array_merge(
+            $branchManager['permissions'],
+            array_values(array_intersect($branchManager['optional_permissions'] ?? [], $registered)),
+        )));
+        $next = array_replace($current, array_fill_keys($allowedAdditions, 1));
+        foreach (self::LEGACY_MANAGER_DENIED_PERMISSIONS as $permission) {
+            unset($next[$permission]);
+        }
+
+        $removed = array_values(array_intersect(array_keys($current), self::LEGACY_MANAGER_DENIED_PERMISSIONS));
+        $added = array_values(array_diff($allowedAdditions, array_keys($current)));
+        if (!$removed && !$added) {
+            return;
+        }
+
+        if ($dryRun) {
+            $result['skipped'][] = 'manager (legacy hardening: -'.count($removed).', +'.count($added).')';
+
+            return;
+        }
+
+        $role->permissions = $next;
+        $role->save();
+        $result['updated'][] = 'manager (legacy hardening: -'.count($removed).', +'.count($added).')';
+        $this->audit->info('restaurant_ops.legacy_manager_hardened', ['role_id' => $role->getKey(), 'removed' => $removed, 'added_count' => count($added)]);
     }
 }
