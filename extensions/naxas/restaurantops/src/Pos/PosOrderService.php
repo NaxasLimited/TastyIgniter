@@ -238,8 +238,32 @@ final class PosOrderService implements PosOrderServiceContract
 
     public function requestKitchen(PosOrder $order, mixed $actor, int $version): PosOrder
     {
-        $updated = $this->transition($order, $actor, $version, PosOrderStatus::KITCHEN_PENDING, ['kitchen_ready_at' => now()], 'kitchen_ready');
-        $items = $updated->items()->where('status', 'unsent')->get()->map(fn ($item) => $item->configuration_payload + ['item_id' => $item->getKey(), 'quantity' => $item->quantity, 'station' => $this->stations->resolve($item->configuration_payload)])->values()->all();
+        $updated = DB::transaction(function () use ($order, $actor, $version): PosOrder {
+            $locked = $this->lock($order, (int) $actor->getAuthIdentifier(), $version);
+            $this->states->assertCan($locked->status, PosOrderStatus::KITCHEN_PENDING);
+            $this->assertDineInReportable($locked);
+
+            $locked->items()
+                ->where('status', 'unsent')
+                ->where('quantity', '>', 0)
+                ->update([
+                    'status' => 'kitchen_pending',
+                    'kitchen_sent_quantity' => DB::raw('quantity'),
+                    'version' => DB::raw('version + 1'),
+                    'updated_at' => now(),
+                ]);
+
+            $locked->forceFill([
+                'status' => PosOrderStatus::KITCHEN_PENDING,
+                'kitchen_ready_at' => now(),
+                'version' => $locked->version + 1,
+            ])->save();
+            $this->event($locked, (int) $actor->getAuthIdentifier(), 'kitchen_ready');
+
+            return $locked->fresh(['items']);
+        }, 3);
+
+        $items = $updated->items()->where('status', 'kitchen_pending')->get()->map(fn ($item) => $item->configuration_payload + ['item_id' => $item->getKey(), 'quantity' => $item->quantity, 'station' => $this->stations->resolve($item->configuration_payload)])->values()->all();
         PosOrderReadyForKitchen::dispatch(['pos_order_id' => $updated->getKey(), 'official_order_id' => $updated->order_id, 'location_id' => $updated->location_id, 'service_type' => $updated->service_type, 'source' => $updated->source, 'items' => $items, 'revision' => $updated->version]);
 
         return $updated;
