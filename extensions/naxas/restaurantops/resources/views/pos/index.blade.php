@@ -286,6 +286,7 @@
     let selectedTableId = null;
     let selectedWaiterId = null;
     let selectedGuestCount = 1;
+    const initialPosOrderId = new URLSearchParams(window.location.search).get('pos_order_id');
     let activeOptionTile = null;
     let activeVariantId = null;
     let kioskMode = true;
@@ -1054,5 +1055,10 @@
     renderService();
     renderAssignments();
     updateKioskButton();
+    if (initialPosOrderId) {
+        refresh(initialPosOrderId)
+            .then(() => show('POS order loaded.'))
+            .catch(error => show(error.message, false));
+    }
 })();
 </script>

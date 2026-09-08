@@ -10,6 +10,7 @@ use Igniter\Cart\Models\Menu;
 use Igniter\Cart\Models\OrderMenu;
 use Igniter\Admin\Http\Controllers\Dashboard;
 use Igniter\Admin\Facades\Template;
+use Igniter\Reservation\Http\Controllers\Reservations as ReservationsController;
 use Igniter\System\Classes\BaseExtension;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
@@ -80,6 +81,7 @@ class Extension extends BaseExtension
             $model->relation['hasOne']['restaurant_ops_snapshot'] = [OrderItemSnapshot::class, 'foreignKey' => 'order_menu_id'];
         });
         $this->extendOfficialOrders();
+        $this->extendOfficialReservations();
 
         resolve(RestaurantOpsDashboardCards::class)->registerCards();
 
@@ -207,6 +209,20 @@ class Extension extends BaseExtension
                     'tab' => 'Restaurant Ops',
                     'type' => 'partial',
                     'path' => 'Naxas.RestaurantOps::orders.pos_details',
+                    'context' => ['edit', 'preview'],
+                ],
+            ]);
+        });
+    }
+
+    private function extendOfficialReservations(): void
+    {
+        ReservationsController::extendFormFields(function ($form): void {
+            $form->addTabFields([
+                'restaurant_ops_pos_open' => [
+                    'tab' => 'Restaurant Ops',
+                    'type' => 'partial',
+                    'path' => 'Naxas.RestaurantOps::reservations.pos_open',
                     'context' => ['edit', 'preview'],
                 ],
             ]);

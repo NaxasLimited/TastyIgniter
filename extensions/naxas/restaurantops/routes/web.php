@@ -9,6 +9,7 @@ use Naxas\RestaurantOps\Http\Controllers\Kitchen\KitchenTickets;
 use Naxas\RestaurantOps\Http\Controllers\OperationalLandings;
 use Naxas\RestaurantOps\Http\Controllers\Payments\PosPayments;
 use Naxas\RestaurantOps\Http\Controllers\Pos\PosOrders;
+use Naxas\RestaurantOps\Http\Controllers\Reservations\ReservationPosOrders;
 use Naxas\RestaurantOps\Http\Controllers\Reports\RestaurantReports;
 use Naxas\RestaurantOps\Http\Controllers\Shifts\CashierShifts;
 use Naxas\RestaurantOps\Http\Controllers\Tables\FloorsController;
@@ -42,6 +43,7 @@ Route::middleware([...config('igniter-routes.adminMiddleware', ['web']), 'locati
         Route::post('/menu-operations-settings/{menu}/official-options/sync', [MenuConfigurations::class, 'syncOfficialOptions'])->middleware('restaurant.ops.permission:Restaurant.MenuConfig.Modifiers.Manage')->name('menu-operations.official-options.sync');
         Route::get('/order-item-snapshots/{orderMenu}', [OrderItemSnapshots::class, 'show'])->middleware('restaurant.ops.permission:Restaurant.Operations.Access')->name('order-item-snapshots.show');
         Route::get('/reports', [RestaurantReports::class, 'index'])->middleware('restaurant.ops.permission:Restaurant.Reports.BranchSales')->name('reports.index');
+        Route::post('/reservations/{reservation}/open-pos', [ReservationPosOrders::class, 'open'])->middleware(['restaurant.ops.permission:Restaurant.POS.Order.Create', 'restaurant.ops.transactional'])->name('reservations.open-pos');
         Route::get('/shifts', [CashierShifts::class, 'index'])->middleware('restaurant.ops.permission:Restaurant.Shifts.Access')->name('shifts.index');
         Route::get('/shifts/mine', [CashierShifts::class, 'mine'])->middleware(['restaurant.ops.permission:Restaurant.Shifts.ViewOwn', 'restaurant.ops.transactional'])->name('shifts.mine');
         Route::get('/shifts/branch-review', [CashierShifts::class, 'branchReview'])->middleware(['restaurant.ops.permission:Restaurant.Shifts.ViewBranch', 'restaurant.ops.transactional'])->name('shifts.branch-review');
