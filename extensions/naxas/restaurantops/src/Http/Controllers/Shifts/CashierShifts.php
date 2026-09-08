@@ -89,7 +89,12 @@ final class CashierShifts extends AdminPageController
     public function show(string $shiftId): Response
     {
         $shift = CashierShift::query()->findOrFail($shiftId);
-        $this->authorizeResource($shift);
+        try {
+            $this->authorizeResource($shift);
+        } catch (ShiftException $exception) {
+            return $this->shiftDeniedResponse($exception);
+        }
+
         $summary = $this->shifts->calculateSummary($shift);
         $shift->load(['movements', 'submissions.denominations']);
 
@@ -162,6 +167,17 @@ final class CashierShifts extends AdminPageController
         if (($own || ! $user->hasPermission('Restaurant.Shifts.ViewBranch')) && $shift->staff_id !== (int) $user->getAuthIdentifier()) {
             throw ShiftException::forbidden('shift_access_denied', 'You may only operate your own shift.');
         }
+    }
+
+    private function shiftDeniedResponse(ShiftException $exception): Response
+    {
+        if (request()->expectsJson()) {
+            return response()->json(['error' => ['code' => $exception->errorCode, 'message' => $exception->getMessage()]], $exception->status);
+        }
+
+        flash()->error($exception->getMessage());
+
+        return redirect()->route('naxas.restaurantops.shifts.index');
     }
 
     private function respond(callable $callback, int $status = 200): Response
