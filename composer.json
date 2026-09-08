@@ -28,6 +28,13 @@
         "source": "https://github.com/tastyigniter/TastyIgniter"
     },
     "repositories": {
+        "naxas-restaurantops": {
+            "type": "path",
+            "url": "extensions/naxas/restaurantops",
+            "options": {
+                "symlink": false
+            }
+        },
         "tastyigniter": {
             "type": "composer",
             "url": "https://composer.tastyigniter.com"
@@ -37,6 +44,7 @@
         "php": "^8.3",
         "laravel/framework": "^12.0",
         "laravel/tinker": "^3.0",
+        "naxas/restaurantops-extension": "*",
         "tastyigniter/core": "^4.3",
         "cweagans/composer-patches": "^1.7"
     },

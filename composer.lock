@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "58af97246dd85bc5f28a7a025eec4926",
+    "content-hash": "05067673071312045dd705749ab79f0c",
     "packages": [
         {
             "name": "ably/ably-php",
@@ -4445,6 +4445,52 @@
                 }
             ],
             "time": "2026-01-02T08:56:05+00:00"
+        },
+        {
+            "name": "naxas/restaurantops-extension",
+            "version": "0.1.0",
+            "dist": {
+                "type": "path",
+                "url": "extensions/naxas/restaurantops",
+                "reference": "bd2df42d94546040adae9f75cd02ca2411562613"
+            },
+            "require": {
+                "php": "^8.3",
+                "tastyigniter/core": "^4.3",
+                "tastyigniter/ti-ext-local": "^4.0",
+                "tastyigniter/ti-ext-user": "^4.0"
+            },
+            "type": "tastyigniter-extension",
+            "extra": {
+                "tastyigniter-extension": {
+                    "code": "Naxas.RestaurantOps",
+                    "name": "Restaurant Operations",
+                    "icon": {
+                        "class": "fa fa-store",
+                        "color": "#FFFFFF",
+                        "backgroundColor": "#E85D04"
+                    },
+                    "homepage": "https://github.com/dpkcse/TastyIgniter"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Naxas\\RestaurantOps\\": "src/"
+                }
+            },
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Naxas"
+                }
+            ],
+            "description": "Upgrade-safe application-owned foundation for restaurant operations modules.",
+            "transport-options": {
+                "symlink": false,
+                "relative": true
+            }
         },
         {
             "name": "nesbot/carbon",
