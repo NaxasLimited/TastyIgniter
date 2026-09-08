@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Naxas\RestaurantOps\Http\Controllers\Kitchen;
 
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Naxas\RestaurantOps\Contracts\LocationContextContract;
 use Naxas\RestaurantOps\Http\Controllers\AdminPageController;
 use Naxas\RestaurantOps\Models\PosOrder;
@@ -92,13 +93,17 @@ final class KitchenTickets extends AdminPageController
             return [];
         }
 
+        $officialOrderKey = Schema::hasColumn('orders', 'order_id')
+            ? 'order_id'
+            : (Schema::hasColumn('orders', 'id') ? 'id' : null);
+
         $orders = PosOrder::query()
             ->with('items')
             ->select('naxas_restaurant_ops_pos_orders.*')
-            ->selectRaw('official.order_id as official_order_id')
+            ->selectRaw($officialOrderKey ? "official.{$officialOrderKey} as official_order_id" : 'naxas_restaurant_ops_pos_orders.order_id as official_order_id')
             ->selectRaw('COALESCE(NULLIF(waiter.name, ""), waiter.username) as waiter_name')
             ->selectRaw('session.guest_count as session_guest_count, table_info.table_number, table_info.name as table_name, floor.name as floor_name')
-            ->leftJoin('orders as official', 'official.order_id', '=', 'naxas_restaurant_ops_pos_orders.order_id')
+            ->when($officialOrderKey, fn ($query) => $query->leftJoin('orders as official', "official.{$officialOrderKey}", '=', 'naxas_restaurant_ops_pos_orders.order_id'))
             ->leftJoin('admin_users as waiter', 'waiter.user_id', '=', 'naxas_restaurant_ops_pos_orders.waiter_id')
             ->leftJoin('naxas_restaurant_ops_table_sessions as session', 'session.id', '=', 'naxas_restaurant_ops_pos_orders.table_session_id')
             ->leftJoin('naxas_restaurant_ops_tables as table_info', function ($join): void {

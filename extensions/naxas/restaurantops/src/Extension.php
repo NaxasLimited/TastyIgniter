@@ -127,20 +127,25 @@ class Extension extends BaseExtension
                 return;
             }
 
+            $orderKeyColumn = $this->officialOrderKeyColumn();
+            if ($orderKeyColumn === null) {
+                return;
+            }
+
             $query->select('orders.*')->addSelect([
                 'rops_pos_id' => DB::table('naxas_restaurant_ops_pos_orders as pos')
                     ->select('pos.id')
-                    ->whereColumn('pos.order_id', 'orders.order_id')
+                    ->whereColumn('pos.order_id', 'orders.'.$orderKeyColumn)
                     ->latest('pos.id')
                     ->limit(1),
                 'rops_pos_status' => DB::table('naxas_restaurant_ops_pos_orders as pos')
                     ->select('pos.status')
-                    ->whereColumn('pos.order_id', 'orders.order_id')
+                    ->whereColumn('pos.order_id', 'orders.'.$orderKeyColumn)
                     ->latest('pos.id')
                     ->limit(1),
                 'rops_pos_service_type' => DB::table('naxas_restaurant_ops_pos_orders as pos')
                     ->select('pos.service_type')
-                    ->whereColumn('pos.order_id', 'orders.order_id')
+                    ->whereColumn('pos.order_id', 'orders.'.$orderKeyColumn)
                     ->latest('pos.id')
                     ->limit(1),
                 'rops_pos_table' => DB::table('naxas_restaurant_ops_pos_orders as pos')
@@ -150,38 +155,38 @@ class Extension extends BaseExtension
                     })
                     ->leftJoin('naxas_restaurant_ops_floors as floor', 'floor.id', '=', 'table.floor_id')
                     ->selectRaw("TRIM(CONCAT(COALESCE(floor.name, ''), CASE WHEN floor.name IS NULL THEN '' ELSE ' / ' END, COALESCE(table.table_number, table.name, '')))")
-                    ->whereColumn('pos.order_id', 'orders.order_id')
+                    ->whereColumn('pos.order_id', 'orders.'.$orderKeyColumn)
                     ->latest('pos.id')
                     ->limit(1),
                 'rops_pos_waiter' => DB::table('naxas_restaurant_ops_pos_orders as pos')
                     ->leftJoin('admin_users as waiter', 'waiter.user_id', '=', 'pos.waiter_id')
                     ->selectRaw("COALESCE(waiter.name, waiter.username)")
-                    ->whereColumn('pos.order_id', 'orders.order_id')
+                    ->whereColumn('pos.order_id', 'orders.'.$orderKeyColumn)
                     ->latest('pos.id')
                     ->limit(1),
                 'rops_pos_shift' => DB::table('naxas_restaurant_ops_pos_orders as pos')
                     ->select('pos.shift_id')
-                    ->whereColumn('pos.order_id', 'orders.order_id')
+                    ->whereColumn('pos.order_id', 'orders.'.$orderKeyColumn)
                     ->latest('pos.id')
                     ->limit(1),
                 'rops_pos_cashier' => DB::table('naxas_restaurant_ops_pos_orders as pos')
                     ->leftJoin('naxas_restaurant_ops_pos_payments as payment', 'payment.pos_order_id', '=', 'pos.id')
                     ->leftJoin('admin_users as cashier', 'cashier.user_id', '=', 'payment.cashier_staff_id')
                     ->selectRaw("COALESCE(cashier.name, cashier.username)")
-                    ->whereColumn('pos.order_id', 'orders.order_id')
+                    ->whereColumn('pos.order_id', 'orders.'.$orderKeyColumn)
                     ->latest('payment.id')
                     ->limit(1),
                 'rops_pos_receipt' => DB::table('naxas_restaurant_ops_pos_orders as pos')
                     ->leftJoin('naxas_restaurant_ops_pos_payments as payment', 'payment.pos_order_id', '=', 'pos.id')
                     ->select('payment.receipt_number')
-                    ->whereColumn('pos.order_id', 'orders.order_id')
+                    ->whereColumn('pos.order_id', 'orders.'.$orderKeyColumn)
                     ->latest('payment.id')
                     ->limit(1),
                 'rops_pos_tender' => DB::table('naxas_restaurant_ops_pos_orders as pos')
                     ->leftJoin('naxas_restaurant_ops_pos_payments as payment', 'payment.pos_order_id', '=', 'pos.id')
                     ->leftJoin('naxas_restaurant_ops_pos_payment_tenders as tender', 'tender.pos_payment_id', '=', 'payment.id')
                     ->selectRaw("GROUP_CONCAT(COALESCE(NULLIF(tender.provider_code, ''), tender.method) ORDER BY tender.id SEPARATOR ', ')")
-                    ->whereColumn('pos.order_id', 'orders.order_id')
+                    ->whereColumn('pos.order_id', 'orders.'.$orderKeyColumn)
                     ->limit(1),
             ]);
         });
@@ -227,6 +232,19 @@ class Extension extends BaseExtension
                 ],
             ]);
         });
+    }
+
+    private function officialOrderKeyColumn(): ?string
+    {
+        if (! Schema::hasTable('orders')) {
+            return null;
+        }
+
+        if (Schema::hasColumn('orders', 'order_id')) {
+            return 'order_id';
+        }
+
+        return Schema::hasColumn('orders', 'id') ? 'id' : null;
     }
 
     #[Override]

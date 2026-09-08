@@ -8,6 +8,7 @@ use Igniter\Cart\Models\Category;
 use Igniter\Cart\Models\Menu;
 use Igniter\User\Models\User;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Naxas\RestaurantOps\Contracts\LocationContextContract;
 use Naxas\RestaurantOps\Http\Controllers\AdminPageController;
 use Naxas\RestaurantOps\Models\ItemVariant;
@@ -395,13 +396,18 @@ final class PosOrders extends AdminPageController
             ? ['held']
             : ['draft', 'active', 'kitchen_pending', 'payment_pending'];
 
+        $officialOrderKey = Schema::hasColumn('orders', 'order_id')
+            ? 'order_id'
+            : (Schema::hasColumn('orders', 'id') ? 'id' : null);
+
         $orders = PosOrder::with('items')
             ->select('naxas_restaurant_ops_pos_orders.*')
-            ->selectRaw('official.order_id as official_order_id, official.status_id as official_status_id, official_status.status_name as official_status_name, official.processed as official_processed, official.payment as official_payment')
+            ->selectRaw(($officialOrderKey ? "official.{$officialOrderKey}" : 'naxas_restaurant_ops_pos_orders.order_id').' as official_order_id')
+            ->selectRaw('official.status_id as official_status_id, official_status.status_name as official_status_name, official.processed as official_processed, official.payment as official_payment')
             ->selectRaw('payment.receipt_number, payment.status as payment_status, payment.paid_at')
             ->selectRaw('COALESCE(NULLIF(waiter.name, ""), waiter.username) as waiter_name, COALESCE(NULLIF(cashier.name, ""), cashier.username) as cashier_name')
             ->selectRaw('session.guest_count as session_guest_count, table_info.table_number, table_info.name as table_name, floor.name as floor_name')
-            ->leftJoin('orders as official', 'official.order_id', '=', 'naxas_restaurant_ops_pos_orders.order_id')
+            ->when($officialOrderKey, fn ($query) => $query->leftJoin('orders as official', "official.{$officialOrderKey}", '=', 'naxas_restaurant_ops_pos_orders.order_id'))
             ->leftJoin('statuses as official_status', 'official_status.status_id', '=', 'official.status_id')
             ->leftJoin('naxas_restaurant_ops_pos_payments as payment', function ($join): void {
                 $join->on('payment.pos_order_id', '=', 'naxas_restaurant_ops_pos_orders.id')
