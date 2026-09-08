@@ -64,6 +64,10 @@ class Extension extends BaseExtension
     #[Override]
     public function boot(): void
     {
+        $this->publishes([
+            __DIR__.'/../resources/assets' => public_path('vendor/naxas-restaurantops'),
+        ], 'naxas-restaurantops-assets');
+
         Template::registerHook('endStyles', fn(): string => sprintf(
             '<link rel="stylesheet" type="text/css" href="%s" data-navigate-once="true">',
             e(asset('vendor/naxas-restaurantops/css/app.css')),
