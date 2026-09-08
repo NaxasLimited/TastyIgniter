@@ -46,7 +46,7 @@ Route::middleware([...config('igniter-routes.adminMiddleware', ['web']), 'locati
         Route::post('/reservations/{reservation}/open-pos', [ReservationPosOrders::class, 'open'])->middleware(['restaurant.ops.permission:Restaurant.POS.Order.Create', 'restaurant.ops.transactional'])->name('reservations.open-pos');
         Route::get('/shifts', [CashierShifts::class, 'index'])->middleware('restaurant.ops.permission:Restaurant.Shifts.Access')->name('shifts.index');
         Route::get('/shifts/mine', [CashierShifts::class, 'mine'])->middleware(['restaurant.ops.permission:Restaurant.Shifts.ViewOwn', 'restaurant.ops.transactional'])->name('shifts.mine');
-        Route::get('/shifts/branch-review', [CashierShifts::class, 'branchReview'])->middleware(['restaurant.ops.permission:Restaurant.Shifts.ViewBranch', 'restaurant.ops.transactional'])->name('shifts.branch-review');
+        Route::match(['get', 'post'], '/shifts/branch-review', [CashierShifts::class, 'branchReview'])->middleware(['restaurant.ops.permission:Restaurant.Shifts.ViewBranch', 'restaurant.ops.transactional'])->name('shifts.branch-review');
         Route::get('/shifts/open', [CashierShifts::class, 'openForm'])->middleware(['restaurant.ops.permission:Restaurant.Shifts.Open', 'restaurant.ops.transactional'])->name('shifts.open');
         Route::post('/shifts', [CashierShifts::class, 'store'])->middleware(['restaurant.ops.permission:Restaurant.Shifts.Open', 'restaurant.ops.transactional'])->name('shifts.store');
         Route::get('/shifts/{shift}', [CashierShifts::class, 'show'])->middleware('restaurant.ops.permission:Restaurant.Shifts.Access')->name('shifts.show');
