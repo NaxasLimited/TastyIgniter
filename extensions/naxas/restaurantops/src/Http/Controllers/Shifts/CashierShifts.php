@@ -162,11 +162,27 @@ final class CashierShifts extends AdminPageController
 
     private function authorizeResource(CashierShift $shift, bool $own = false): void
     {
+        $this->selectShiftLocationForPrivilegedUser($shift);
         $this->shifts->assertLocation($shift);
         $user = $this->user();
         if (($own || ! $user->hasPermission('Restaurant.Shifts.ViewBranch')) && $shift->staff_id !== (int) $user->getAuthIdentifier()) {
             throw ShiftException::forbidden('shift_access_denied', 'You may only operate your own shift.');
         }
+    }
+
+    private function selectShiftLocationForPrivilegedUser(CashierShift $shift): void
+    {
+        $context = app(LocationContextContract::class);
+        if ((int) $context->currentId() === (int) $shift->location_id) {
+            return;
+        }
+
+        $user = $this->user();
+        if (! $user->hasPermission('Restaurant.LocationContext.Switch') || ! $context->canAccess($shift->location_id)) {
+            return;
+        }
+
+        $context->set($shift->location_id);
     }
 
     private function shiftDeniedResponse(ShiftException $exception): Response

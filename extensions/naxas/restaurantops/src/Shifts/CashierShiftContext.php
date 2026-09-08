@@ -28,7 +28,13 @@ final class CashierShiftContext implements ShiftContextContract
 
     public function currentForStaff(int $staffId): ?CashierShift
     {
-        return CashierShift::query()->where('active_staff_id', $staffId)->first();
+        $query = CashierShift::query()->where('active_staff_id', $staffId);
+
+        if (! $this->locations->isGlobal() && $this->locations->currentId()) {
+            $query->where('location_id', $this->locations->currentId());
+        }
+
+        return $query->first();
     }
 
     public function requireOpenShift(int $staffId): CashierShift
@@ -53,7 +59,7 @@ final class CashierShiftContext implements ShiftContextContract
         try {
             return DB::transaction(function () use ($staff, $staffId, $location, $cash, $terminalCode, $note): CashierShift {
                 $staff->newQuery()->whereKey($staffId)->lockForUpdate()->first();
-                if ($existing = CashierShift::query()->where('active_staff_id', $staffId)->lockForUpdate()->first()) {
+                if ($existing = CashierShift::query()->where('active_staff_id', $staffId)->where('location_id', $location->getKey())->lockForUpdate()->first()) {
                     throw ShiftException::conflict('shift_already_open', "Staff already has active shift {$existing->getKey()}.");
                 }
 
