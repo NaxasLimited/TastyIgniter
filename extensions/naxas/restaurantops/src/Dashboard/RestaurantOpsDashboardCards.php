@@ -10,6 +10,7 @@ use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
 use Naxas\RestaurantOps\Contracts\LocationContextContract;
 use Naxas\RestaurantOps\Pos\PosOrderStatus;
+use Naxas\RestaurantOps\Support\RawSql;
 
 final class RestaurantOpsDashboardCards
 {
@@ -70,7 +71,7 @@ final class RestaurantOpsDashboardCards
 
     private function todaySales(): string
     {
-        $statuses = array_filter(array_map('intval', (array)Settings::get('completed_order_status')));
+        $statuses = array_filter(array_map('intval', (array) Settings::get('completed_order_status')));
         $query = DB::table('orders')
             ->whereIn('status_id', $statuses !== [] ? $statuses : [5])
             ->whereDate('order_date', now()->toDateString());
@@ -124,8 +125,8 @@ final class RestaurantOpsDashboardCards
         match ($tender) {
             'cash' => $query->where('tenders.method', 'cash'),
             'card' => $query->where('tenders.method', 'card'),
-            'bkash' => $query->whereIn(DB::raw('LOWER(COALESCE(tenders.provider_code, ""))'), ['bkash', 'b-kash']),
-            'nagad' => $query->where(DB::raw('LOWER(COALESCE(tenders.provider_code, ""))'), 'nagad'),
+            'bkash' => $query->whereIn(DB::raw(RawSql::qualifyAliases('LOWER(COALESCE(tenders.provider_code, ""))', ['tenders'])), ['bkash', 'b-kash']),
+            'nagad' => $query->where(DB::raw(RawSql::qualifyAliases('LOWER(COALESCE(tenders.provider_code, ""))', ['tenders'])), 'nagad'),
             default => null,
         };
 

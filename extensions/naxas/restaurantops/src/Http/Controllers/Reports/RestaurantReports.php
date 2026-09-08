@@ -11,6 +11,7 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Naxas\RestaurantOps\Contracts\LocationContextContract;
 use Naxas\RestaurantOps\Http\Controllers\AdminPageController;
+use Naxas\RestaurantOps\Support\RawSql;
 
 final class RestaurantReports extends AdminPageController
 {
@@ -34,10 +35,10 @@ final class RestaurantReports extends AdminPageController
         $shiftSummary = $this->shiftSummary($from, $to);
 
         $totals = [
-            'sales' => (float)$branchSales->sum('sales_total'),
-            'orders' => (int)$branchSales->sum('order_count'),
-            'payments' => (float)$paymentSummary->sum('amount_total'),
-            'payment_count' => (int)$paymentSummary->sum('payment_count'),
+            'sales' => (float) $branchSales->sum('sales_total'),
+            'orders' => (int) $branchSales->sum('order_count'),
+            'payments' => (float) $paymentSummary->sum('amount_total'),
+            'payment_count' => (int) $paymentSummary->sum('payment_count'),
         ];
         $totals['average_ticket'] = $totals['orders'] > 0 ? $totals['sales'] / $totals['orders'] : 0;
 
@@ -56,8 +57,8 @@ final class RestaurantReports extends AdminPageController
 
     private function dateRange(): array
     {
-        $from = $this->parseDate((string)request('from'), now()->subDays(30)->toDateString())->startOfDay();
-        $to = $this->parseDate((string)request('to'), now()->toDateString())->endOfDay();
+        $from = $this->parseDate((string) request('from'), now()->subDays(30)->toDateString())->startOfDay();
+        $to = $this->parseDate((string) request('to'), now()->toDateString())->endOfDay();
 
         if ($from->greaterThan($to)) {
             return [$to->startOfDay(), $from->endOfDay()];
@@ -77,7 +78,7 @@ final class RestaurantReports extends AdminPageController
 
     private function completedStatuses(): array
     {
-        $statuses = array_filter(array_map('intval', (array)Settings::get('completed_order_status')));
+        $statuses = array_filter(array_map('intval', (array) Settings::get('completed_order_status')));
 
         return $statuses !== [] ? $statuses : [5];
     }
@@ -95,8 +96,8 @@ final class RestaurantReports extends AdminPageController
     {
         return $this->orderBase($from, $to, $completedStatuses)
             ->leftJoin('locations', 'locations.location_id', '=', 'orders.location_id')
-            ->selectRaw('orders.location_id, COALESCE(locations.location_name, CONCAT("Branch #", orders.location_id)) as branch_name')
-            ->selectRaw('COUNT(*) as order_count, COALESCE(SUM(orders.order_total), 0) as sales_total, COALESCE(AVG(orders.order_total), 0) as average_ticket')
+            ->selectRaw(RawSql::qualifyAliases('orders.location_id, COALESCE(locations.location_name, CONCAT("Branch #", orders.location_id)) as branch_name', ['orders', 'locations']))
+            ->selectRaw(RawSql::qualifyAliases('COUNT(*) as order_count, COALESCE(SUM(orders.order_total), 0) as sales_total, COALESCE(AVG(orders.order_total), 0) as average_ticket', ['orders']))
             ->groupBy('orders.location_id', 'locations.location_name')
             ->orderBy('branch_name')
             ->get();
@@ -105,7 +106,7 @@ final class RestaurantReports extends AdminPageController
     private function serviceSummary(CarbonImmutable $from, CarbonImmutable $to, array $completedStatuses): Collection
     {
         $rows = $this->orderBase($from, $to, $completedStatuses)
-            ->selectRaw('orders.order_type, COUNT(*) as order_count, COALESCE(SUM(orders.order_total), 0) as sales_total, COALESCE(AVG(orders.order_total), 0) as average_ticket')
+            ->selectRaw(RawSql::qualifyAliases('orders.order_type, COUNT(*) as order_count, COALESCE(SUM(orders.order_total), 0) as sales_total, COALESCE(AVG(orders.order_total), 0) as average_ticket', ['orders']))
             ->groupBy('orders.order_type')
             ->get()
             ->keyBy('order_type');
@@ -116,22 +117,22 @@ final class RestaurantReports extends AdminPageController
             'delivery' => 'Delivery',
         ])->map(fn (string $label, string $type): array => [
             'service' => $label,
-            'order_count' => (int)($rows[$type]->order_count ?? 0),
-            'sales_total' => (float)($rows[$type]->sales_total ?? 0),
-            'average_ticket' => (float)($rows[$type]->average_ticket ?? 0),
+            'order_count' => (int) ($rows[$type]->order_count ?? 0),
+            'sales_total' => (float) ($rows[$type]->sales_total ?? 0),
+            'average_ticket' => (float) ($rows[$type]->average_ticket ?? 0),
         ])->values();
     }
 
     private function paymentSummary(CarbonImmutable $from, CarbonImmutable $to): Collection
     {
-        $categorySql = "CASE
+        $categorySql = RawSql::qualifyAliases("CASE
             WHEN LOWER(tenders.method) = 'cash' THEN 'cash'
             WHEN LOWER(tenders.method) = 'card' THEN 'card'
             WHEN LOWER(COALESCE(tenders.provider_code, '')) IN ('bkash', 'b-kash') THEN 'bkash'
             WHEN LOWER(COALESCE(tenders.provider_code, '')) = 'nagad' THEN 'nagad'
             WHEN LOWER(COALESCE(tenders.provider_code, '')) = 'rocket' THEN 'other'
             ELSE 'other'
-        END";
+        END", ['tenders']);
 
         $query = DB::table('naxas_restaurant_ops_pos_payment_tenders as tenders')
             ->join('naxas_restaurant_ops_pos_payments as payments', 'payments.id', '=', 'tenders.pos_payment_id')
@@ -139,7 +140,7 @@ final class RestaurantReports extends AdminPageController
             ->where('tenders.status', 'applied')
             ->whereBetween('payments.paid_at', [$from, $to])
             ->selectRaw($categorySql.' as tender_key')
-            ->selectRaw('COUNT(*) as tender_count, COUNT(DISTINCT payments.id) as payment_count, COALESCE(SUM(tenders.amount_applied), 0) as amount_total')
+            ->selectRaw(RawSql::qualifyAliases('COUNT(*) as tender_count, COUNT(DISTINCT payments.id) as payment_count, COALESCE(SUM(tenders.amount_applied), 0) as amount_total', ['payments', 'tenders']))
             ->groupByRaw($categorySql)
             ->orderByDesc('amount_total');
 
@@ -152,16 +153,16 @@ final class RestaurantReports extends AdminPageController
             'card' => 'Card',
             'other' => 'Other',
         ])->map(function (string $label, string $key) use ($rows): object {
-            return (object)[
+            return (object) [
                 'tender_key' => $key,
                 'method_label' => $label,
-                'tender_count' => (int)($rows[$key]->tender_count ?? 0),
-                'payment_count' => (int)($rows[$key]->payment_count ?? 0),
-                'amount_total' => (float)($rows[$key]->amount_total ?? 0),
+                'tender_count' => (int) ($rows[$key]->tender_count ?? 0),
+                'payment_count' => (int) ($rows[$key]->payment_count ?? 0),
+                'amount_total' => (float) ($rows[$key]->amount_total ?? 0),
             ];
         })->reject(function (object $row): bool {
             return $row->tender_key === 'other' && $row->tender_count === 0;
-            });
+        });
     }
 
     private function shiftSummary(CarbonImmutable $from, CarbonImmutable $to): Collection
@@ -176,10 +177,10 @@ final class RestaurantReports extends AdminPageController
             ->leftJoin('locations', 'locations.location_id', '=', 'shifts.location_id')
             ->leftJoin('admin_users', 'admin_users.user_id', '=', 'shifts.staff_id')
             ->whereBetween('shifts.opened_at', [$from, $to])
-            ->selectRaw('shifts.id, shifts.status, shifts.opened_at, shifts.submitted_at, shifts.approved_at, shifts.expected_cash, shifts.counted_cash, shifts.variance')
-            ->selectRaw('COALESCE(locations.location_name, CONCAT("Branch #", shifts.location_id)) as branch_name')
-            ->selectRaw('COALESCE(NULLIF(admin_users.name, ""), admin_users.username, CONCAT("Staff #", shifts.staff_id)) as staff_name')
-            ->selectRaw('COALESCE(shift_payments.payment_count, 0) as payment_count, COALESCE(shift_payments.paid_total, 0) as paid_total')
+            ->selectRaw(RawSql::qualifyAliases('shifts.id, shifts.status, shifts.opened_at, shifts.submitted_at, shifts.approved_at, shifts.expected_cash, shifts.counted_cash, shifts.variance', ['shifts']))
+            ->selectRaw(RawSql::qualifyAliases('COALESCE(locations.location_name, CONCAT("Branch #", shifts.location_id)) as branch_name', ['locations', 'shifts']))
+            ->selectRaw(RawSql::qualifyAliases('COALESCE(NULLIF(admin_users.name, ""), admin_users.username, CONCAT("Staff #", shifts.staff_id)) as staff_name', ['admin_users', 'shifts']))
+            ->selectRaw(RawSql::qualifyAliases('COALESCE(shift_payments.payment_count, 0) as payment_count, COALESCE(shift_payments.paid_total, 0) as paid_total', ['shift_payments']))
             ->orderByDesc('shifts.opened_at')
             ->limit(25);
 
@@ -200,5 +201,4 @@ final class RestaurantReports extends AdminPageController
 
         return $ids !== [] ? $query->whereIn($column, $ids) : $query->whereRaw('1 = 0');
     }
-
 }

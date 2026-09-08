@@ -17,6 +17,7 @@ use Naxas\RestaurantOps\Models\RestaurantTable;
 use Naxas\RestaurantOps\Pos\Contracts\PosOrderServiceContract;
 use Naxas\RestaurantOps\Pos\Exceptions\PosException;
 use Naxas\RestaurantOps\Shifts\Contracts\ShiftContextContract;
+use Naxas\RestaurantOps\Support\RawSql;
 use Symfony\Component\HttpFoundation\Response;
 use Throwable;
 
@@ -36,7 +37,7 @@ final class PosOrders extends AdminPageController
         $orders = $shift ? PosOrder::with('items')->where('shift_id', $shift->getKey())->whereIn('status', ['draft', 'held', 'active', 'kitchen_pending', 'payment_pending'])->latest()->limit(80)->get() : collect();
         $categories = Category::query()
             ->where('status', true)
-            ->whereHas('menus', fn($query) => $query->where('menu_status', true))
+            ->whereHas('menus', fn ($query) => $query->where('menu_status', true))
             ->orderBy('priority')
             ->orderBy('name')
             ->get();
@@ -261,7 +262,14 @@ final class PosOrders extends AdminPageController
                 ->leftJoin('naxas_restaurant_ops_tables as table', 'table.id', '=', 'session.active_table_id')
                 ->leftJoin('naxas_restaurant_ops_floors as floor', 'floor.id', '=', 'table.floor_id')
                 ->where('session.id', $order->table_session_id)
-                ->selectRaw('session.table_id, session.active_table_id, session.guest_count as session_guest_count, table.name, table.table_number, floor.name as floor_name')
+                ->select([
+                    'session.table_id',
+                    'session.active_table_id',
+                    'session.guest_count as session_guest_count',
+                    'table.name',
+                    'table.table_number',
+                    'floor.name as floor_name',
+                ])
                 ->first();
         }
 
@@ -345,7 +353,10 @@ final class PosOrders extends AdminPageController
                 'modifiers.max_quantity',
                 'modifiers.is_default',
                 'option_values.name as modifier_name',
-                DB::raw('COALESCE(menu_values.override_price, modifiers.price_adjustment, option_values.price, 0) as price'),
+                DB::raw(RawSql::qualifyAliases(
+                    'COALESCE(menu_values.override_price, modifiers.price_adjustment, option_values.price, 0) as price',
+                    ['menu_values', 'modifiers', 'option_values'],
+                )),
             ]);
 
         foreach ($rows as $row) {
