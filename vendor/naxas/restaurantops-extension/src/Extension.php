@@ -1,0 +1,294 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Naxas\RestaurantOps;
+
+use App\Services\LocationContext;
+use Igniter\Cart\Http\Controllers\Orders as OrdersController;
+use Igniter\Cart\Models\Menu;
+use Igniter\Cart\Models\OrderMenu;
+use Igniter\Admin\Http\Controllers\Dashboard;
+use Igniter\Admin\Facades\Template;
+use Igniter\Reservation\Http\Controllers\Reservations as ReservationsController;
+use Igniter\System\Classes\BaseExtension;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Schema;
+use Naxas\RestaurantOps\Console\InstallCommand;
+use Naxas\RestaurantOps\Console\SyncRolesCommand;
+use Naxas\RestaurantOps\Console\UpgradeCommand;
+use Naxas\RestaurantOps\Console\VerifyInstallationCommand;
+use Naxas\RestaurantOps\Console\VerifyMenuIntegrationCommand;
+use Naxas\RestaurantOps\Console\VerifyPaymentsCommand;
+use Naxas\RestaurantOps\Console\VerifyPosCommand;
+use Naxas\RestaurantOps\Console\VerifyShiftsCommand;
+use Naxas\RestaurantOps\Contracts\AuditLogger;
+use Naxas\RestaurantOps\Contracts\LocationContextContract;
+use Naxas\RestaurantOps\Dashboard\RestaurantOpsDashboardCards;
+use Naxas\RestaurantOps\Http\Middleware\RequiresOperationalPermission;
+use Naxas\RestaurantOps\Http\Middleware\RequiresTransactionalLocation;
+use Naxas\RestaurantOps\Integrations\ActivityLogAdapter;
+use Naxas\RestaurantOps\Listeners\PersistEnhancedOrderSnapshots;
+use Naxas\RestaurantOps\MenuConfiguration\Contracts\KitchenRoutingResolver;
+use Naxas\RestaurantOps\MenuConfiguration\DefaultKitchenRoutingResolver;
+use Naxas\RestaurantOps\MenuIntegration\Contracts\OfficialCartAdapter;
+use Naxas\RestaurantOps\MenuIntegration\TastyIgniterCartAdapter;
+use Naxas\RestaurantOps\Models\ItemVariant;
+use Naxas\RestaurantOps\Models\MenuItemMetadata;
+use Naxas\RestaurantOps\Models\OrderItemSnapshot;
+use Naxas\RestaurantOps\Payments\Contracts\OfficialPaymentAdapter;
+use Naxas\RestaurantOps\Payments\Contracts\ReceiptNumberProvider;
+use Naxas\RestaurantOps\Payments\Contracts\ShiftTenderRecorder;
+use Naxas\RestaurantOps\Payments\DatabaseReceiptNumberProvider;
+use Naxas\RestaurantOps\Payments\OfficialOrderPaymentAdapter;
+use Naxas\RestaurantOps\Payments\OpenShiftTenderRecorder;
+use Naxas\RestaurantOps\Pos\Contracts\PosOrderServiceContract;
+use Naxas\RestaurantOps\Pos\PosOrderService;
+use Naxas\RestaurantOps\Shifts\CashierShiftContext;
+use Naxas\RestaurantOps\Shifts\Contracts\PaymentSummaryProvider;
+use Naxas\RestaurantOps\Shifts\Contracts\ShiftClosingWarningProvider;
+use Naxas\RestaurantOps\Shifts\Contracts\ShiftContextContract;
+use Naxas\RestaurantOps\Shifts\OfficialPaymentSummaryProvider;
+use Naxas\RestaurantOps\Shifts\PosClosingWarningProvider;
+use Naxas\RestaurantOps\Support\PermissionDefinitions;
+use Naxas\RestaurantOps\Tables\TableManagementService;
+use Override;
+
+class Extension extends BaseExtension
+{
+    protected $listen = [
+        'igniter.checkout.afterSaveOrder' => [PersistEnhancedOrderSnapshots::class],
+    ];
+
+    #[Override]
+    public function boot(): void
+    {
+        Template::registerHook('endStyles', fn(): string => sprintf(
+            '<link rel="stylesheet" type="text/css" href="%s" data-navigate-once="true">',
+            e(asset('vendor/naxas-restaurantops/css/app.css')),
+        ));
+        Template::registerHook('endScripts', fn(): string => sprintf(
+            '<script type="text/javascript" src="%s" data-navigate-once="true"></script>',
+            e(asset('vendor/naxas-restaurantops/js/app.js')),
+        ));
+
+        Menu::extend(function (Menu $model): void {
+            $model->relation['hasMany']['restaurant_ops_variants'] = [ItemVariant::class, 'foreignKey' => 'menu_id'];
+            $model->relation['hasOne']['restaurant_ops_metadata'] = [MenuItemMetadata::class, 'foreignKey' => 'menu_id'];
+        });
+        OrderMenu::extend(function (OrderMenu $model): void {
+            $model->relation['hasOne']['restaurant_ops_snapshot'] = [OrderItemSnapshot::class, 'foreignKey' => 'order_menu_id'];
+        });
+        $this->extendOfficialOrders();
+        $this->extendOfficialReservations();
+
+        resolve(RestaurantOpsDashboardCards::class)->registerCards();
+
+        Event::listen('admin.controller.beforeRemap', function ($controller): void {
+            if (! $controller instanceof Dashboard) {
+                return;
+            }
+
+            $controller->containerConfig['defaultWidgets'] = $this->restaurantOpsDashboardWidgets()
+                + ((array)($controller->containerConfig['defaultWidgets'] ?? []) ?: $this->coreDashboardWidgets());
+        });
+    }
+
+    private function coreDashboardWidgets(): array
+    {
+        return [
+            'onboarding' => ['priority' => 1, 'width' => '12'],
+            'reports' => ['widget' => 'charts', 'priority' => 20, 'width' => '6'],
+            'news' => ['priority' => 21, 'width' => '6'],
+            'order_stats' => ['widget' => 'stats', 'priority' => 30, 'card' => 'sale', 'width' => '4'],
+            'reservation_stats' => ['widget' => 'stats', 'priority' => 31, 'card' => 'lost_sale', 'width' => '4'],
+            'customer_stats' => ['widget' => 'stats', 'priority' => 32, 'card' => 'cash_payment', 'width' => '4'],
+        ];
+    }
+
+    private function restaurantOpsDashboardWidgets(): array
+    {
+        return [
+            'rops_today_sales' => ['widget' => 'stats', 'priority' => 5, 'card' => 'rops_today_sales', 'width' => '3'],
+            'rops_active_dine_in' => ['widget' => 'stats', 'priority' => 6, 'card' => 'rops_active_dine_in', 'width' => '3'],
+            'rops_unpaid_orders' => ['widget' => 'stats', 'priority' => 7, 'card' => 'rops_unpaid_orders', 'width' => '3'],
+            'rops_paid_cash_today' => ['widget' => 'stats', 'priority' => 8, 'card' => 'rops_paid_cash_today', 'width' => '3'],
+            'rops_paid_bkash_today' => ['widget' => 'stats', 'priority' => 9, 'card' => 'rops_paid_bkash_today', 'width' => '3'],
+            'rops_paid_nagad_today' => ['widget' => 'stats', 'priority' => 10, 'card' => 'rops_paid_nagad_today', 'width' => '3'],
+            'rops_paid_card_today' => ['widget' => 'stats', 'priority' => 11, 'card' => 'rops_paid_card_today', 'width' => '3'],
+        ];
+    }
+
+    private function extendOfficialOrders(): void
+    {
+        OrdersController::extendListQuery(function ($widget, $query): void {
+            if (! Schema::hasTable('naxas_restaurant_ops_pos_orders')) {
+                return;
+            }
+
+            $query->select('orders.*')->addSelect([
+                'rops_pos_id' => DB::table('naxas_restaurant_ops_pos_orders as pos')
+                    ->select('pos.id')
+                    ->whereColumn('pos.order_id', 'orders.order_id')
+                    ->latest('pos.id')
+                    ->limit(1),
+                'rops_pos_status' => DB::table('naxas_restaurant_ops_pos_orders as pos')
+                    ->select('pos.status')
+                    ->whereColumn('pos.order_id', 'orders.order_id')
+                    ->latest('pos.id')
+                    ->limit(1),
+                'rops_pos_service_type' => DB::table('naxas_restaurant_ops_pos_orders as pos')
+                    ->select('pos.service_type')
+                    ->whereColumn('pos.order_id', 'orders.order_id')
+                    ->latest('pos.id')
+                    ->limit(1),
+                'rops_pos_table' => DB::table('naxas_restaurant_ops_pos_orders as pos')
+                    ->leftJoin('naxas_restaurant_ops_table_sessions as session', 'session.id', '=', 'pos.table_session_id')
+                    ->leftJoin('naxas_restaurant_ops_tables as table', function ($join) {
+                        $join->on('table.id', '=', DB::raw('COALESCE(session.active_table_id, session.table_id)'));
+                    })
+                    ->leftJoin('naxas_restaurant_ops_floors as floor', 'floor.id', '=', 'table.floor_id')
+                    ->selectRaw("TRIM(CONCAT(COALESCE(floor.name, ''), CASE WHEN floor.name IS NULL THEN '' ELSE ' / ' END, COALESCE(table.table_number, table.name, '')))")
+                    ->whereColumn('pos.order_id', 'orders.order_id')
+                    ->latest('pos.id')
+                    ->limit(1),
+                'rops_pos_waiter' => DB::table('naxas_restaurant_ops_pos_orders as pos')
+                    ->leftJoin('admin_users as waiter', 'waiter.user_id', '=', 'pos.waiter_id')
+                    ->selectRaw("COALESCE(waiter.name, waiter.username)")
+                    ->whereColumn('pos.order_id', 'orders.order_id')
+                    ->latest('pos.id')
+                    ->limit(1),
+                'rops_pos_shift' => DB::table('naxas_restaurant_ops_pos_orders as pos')
+                    ->select('pos.shift_id')
+                    ->whereColumn('pos.order_id', 'orders.order_id')
+                    ->latest('pos.id')
+                    ->limit(1),
+                'rops_pos_cashier' => DB::table('naxas_restaurant_ops_pos_orders as pos')
+                    ->leftJoin('naxas_restaurant_ops_pos_payments as payment', 'payment.pos_order_id', '=', 'pos.id')
+                    ->leftJoin('admin_users as cashier', 'cashier.user_id', '=', 'payment.cashier_staff_id')
+                    ->selectRaw("COALESCE(cashier.name, cashier.username)")
+                    ->whereColumn('pos.order_id', 'orders.order_id')
+                    ->latest('payment.id')
+                    ->limit(1),
+                'rops_pos_receipt' => DB::table('naxas_restaurant_ops_pos_orders as pos')
+                    ->leftJoin('naxas_restaurant_ops_pos_payments as payment', 'payment.pos_order_id', '=', 'pos.id')
+                    ->select('payment.receipt_number')
+                    ->whereColumn('pos.order_id', 'orders.order_id')
+                    ->latest('payment.id')
+                    ->limit(1),
+                'rops_pos_tender' => DB::table('naxas_restaurant_ops_pos_orders as pos')
+                    ->leftJoin('naxas_restaurant_ops_pos_payments as payment', 'payment.pos_order_id', '=', 'pos.id')
+                    ->leftJoin('naxas_restaurant_ops_pos_payment_tenders as tender', 'tender.pos_payment_id', '=', 'payment.id')
+                    ->selectRaw("GROUP_CONCAT(COALESCE(NULLIF(tender.provider_code, ''), tender.method) ORDER BY tender.id SEPARATOR ', ')")
+                    ->whereColumn('pos.order_id', 'orders.order_id')
+                    ->limit(1),
+            ]);
+        });
+
+        OrdersController::extendListColumns(function ($list): void {
+            $list->addColumns([
+                'rops_pos_context' => [
+                    'label' => 'POS context',
+                    'type' => 'partial',
+                    'path' => 'Naxas.RestaurantOps::orders.list_pos_context',
+                    'sortable' => false,
+                ],
+                'rops_pos_payment' => [
+                    'label' => 'POS payment',
+                    'type' => 'partial',
+                    'path' => 'Naxas.RestaurantOps::orders.list_pos_payment',
+                    'sortable' => false,
+                ],
+            ]);
+        });
+
+        OrdersController::extendFormFields(function ($form): void {
+            $form->addTabFields([
+                'restaurant_ops_pos_details' => [
+                    'tab' => 'Restaurant Ops',
+                    'type' => 'partial',
+                    'path' => 'Naxas.RestaurantOps::orders.pos_details',
+                    'context' => ['edit', 'preview'],
+                ],
+            ]);
+        });
+    }
+
+    private function extendOfficialReservations(): void
+    {
+        ReservationsController::extendFormFields(function ($form): void {
+            $form->addTabFields([
+                'restaurant_ops_pos_open' => [
+                    'tab' => 'Restaurant Ops',
+                    'type' => 'partial',
+                    'path' => 'Naxas.RestaurantOps::reservations.pos_open',
+                    'context' => ['edit', 'preview'],
+                ],
+            ]);
+        });
+    }
+
+    #[Override]
+    public function register(): void
+    {
+        parent::register();
+        $this->mergeConfigFrom(__DIR__.'/../config/payment.php', 'restaurant-ops.payment');
+
+        $this->app->scoped(LocationContextContract::class, fn ($app): LocationContextContract => $app->make(LocationContext::class));
+        $this->app->singleton(AuditLogger::class, ActivityLogAdapter::class);
+        $this->app->singleton(KitchenRoutingResolver::class, DefaultKitchenRoutingResolver::class);
+        $this->app->scoped(OfficialCartAdapter::class, TastyIgniterCartAdapter::class);
+        $this->app->scoped(PaymentSummaryProvider::class, OfficialPaymentSummaryProvider::class);
+        $this->app->scoped(OfficialPaymentAdapter::class, OfficialOrderPaymentAdapter::class);
+        $this->app->scoped(ReceiptNumberProvider::class, DatabaseReceiptNumberProvider::class);
+        $this->app->scoped(ShiftTenderRecorder::class, OpenShiftTenderRecorder::class);
+        $this->app->scoped(ShiftClosingWarningProvider::class, PosClosingWarningProvider::class);
+        $this->app->scoped(ShiftContextContract::class, CashierShiftContext::class);
+        $this->app->scoped(PosOrderServiceContract::class, PosOrderService::class);
+        $this->app->scoped(TableManagementService::class);
+        $this->registerConsoleCommand('restaurant-ops.sync-roles', SyncRolesCommand::class);
+        $this->registerConsoleCommand('restaurant-ops.install', InstallCommand::class);
+        $this->registerConsoleCommand('restaurant-ops.upgrade', UpgradeCommand::class);
+        $this->registerConsoleCommand('restaurant-ops.verify-installation', VerifyInstallationCommand::class);
+        $this->registerConsoleCommand('restaurant-ops.verify-menu-integration', VerifyMenuIntegrationCommand::class);
+        $this->registerConsoleCommand('restaurant-ops.verify-shifts', VerifyShiftsCommand::class);
+        $this->registerConsoleCommand('restaurant-ops.verify-pos', VerifyPosCommand::class);
+        $this->registerConsoleCommand('restaurant-ops.verify-payments', VerifyPaymentsCommand::class);
+        $this->app['router']->aliasMiddleware('restaurant.ops.permission', RequiresOperationalPermission::class);
+        $this->app['router']->aliasMiddleware('restaurant.ops.transactional', RequiresTransactionalLocation::class);
+    }
+
+    #[Override]
+    public function registerPermissions(): array
+    {
+        return PermissionDefinitions::all();
+    }
+
+    #[Override]
+    public function registerNavigation(): array
+    {
+        return [
+            'restaurant-operations' => [
+                'priority' => 450, 'class' => 'restaurant-operations', 'icon' => 'fa fa-store',
+                'title' => lang('Naxas.RestaurantOps::default.navigation.operations'),
+                'href' => route('naxas.restaurantops.overview'), 'permission' => 'Restaurant.Operations.Access',
+                'child' => [
+                    'restaurant-ops-overview' => ['priority' => 10, 'class' => 'restaurant-ops-overview', 'title' => lang('Naxas.RestaurantOps::default.navigation.overview'), 'href' => route('naxas.restaurantops.overview'), 'permission' => 'Restaurant.Operations.Access'],
+                    'restaurant-ops-table-map' => ['priority' => 35, 'class' => 'restaurant-ops-table-map', 'title' => lang('Naxas.RestaurantOps::default.navigation.table_map'), 'href' => route('naxas.restaurantops.tables.map'), 'permission' => 'Restaurant.Tables.View'],
+                    'restaurant-ops-tables' => ['priority' => 36, 'class' => 'restaurant-ops-tables', 'title' => lang('Naxas.RestaurantOps::default.navigation.tables'), 'href' => route('naxas.restaurantops.tables.index'), 'permission' => 'Restaurant.Tables.Manage'],
+                    'restaurant-ops-pos' => ['priority' => 41, 'class' => 'restaurant-ops-pos', 'title' => lang('Naxas.RestaurantOps::default.navigation.pos'), 'href' => route('naxas.restaurantops.pos'), 'permission' => 'Restaurant.POS.Access'],
+                    'restaurant-ops-pos-active' => ['priority' => 42, 'class' => 'restaurant-ops-pos-active', 'title' => lang('Naxas.RestaurantOps::default.navigation.active_orders'), 'href' => route('naxas.restaurantops.orders.active'), 'permission' => 'Restaurant.POS.Access'],
+                    'restaurant-ops-pos-held' => ['priority' => 43, 'class' => 'restaurant-ops-pos-held', 'title' => lang('Naxas.RestaurantOps::default.navigation.held_orders'), 'href' => route('naxas.restaurantops.orders.held'), 'permission' => 'Restaurant.POS.Order.Recall'],
+                    'restaurant-ops-waiter' => ['priority' => 50, 'class' => 'restaurant-ops-waiter', 'title' => lang('Naxas.RestaurantOps::default.navigation.waiter'), 'href' => route('naxas.restaurantops.waiter'), 'permission' => 'Restaurant.Waiter.Access'],
+                    'restaurant-ops-kitchen' => ['priority' => 60, 'class' => 'restaurant-ops-kitchen', 'title' => lang('Naxas.RestaurantOps::default.navigation.kitchen'), 'href' => route('naxas.restaurantops.kitchen'), 'permission' => 'Restaurant.Kitchen.Access'],
+                    'restaurant-ops-menu-config' => ['priority' => 70, 'class' => 'restaurant-ops-menu-config', 'title' => lang('Naxas.RestaurantOps::default.navigation.menu_operations_settings'), 'href' => route('naxas.restaurantops.menu-operations.index'), 'permission' => 'Restaurant.MenuConfig.View'],
+                    'restaurant-ops-shifts' => ['priority' => 80, 'class' => 'restaurant-ops-shifts', 'title' => lang('Naxas.RestaurantOps::default.navigation.shifts'), 'href' => route('naxas.restaurantops.shifts.index'), 'permission' => 'Restaurant.Shifts.Access'],
+                    'restaurant-ops-active-shift' => ['priority' => 81, 'class' => 'restaurant-ops-active-shift', 'title' => lang('Naxas.RestaurantOps::default.navigation.active_shift'), 'href' => route('naxas.restaurantops.shifts.mine'), 'permission' => 'Restaurant.Shifts.ViewOwn'],
+                    'restaurant-ops-shift-review' => ['priority' => 82, 'class' => 'restaurant-ops-shift-review', 'title' => lang('Naxas.RestaurantOps::default.navigation.shift_review'), 'href' => route('naxas.restaurantops.shifts.branch-review'), 'permission' => 'Restaurant.Shifts.ViewBranch'],
+                    'restaurant-ops-reports' => ['priority' => 90, 'class' => 'restaurant-ops-reports', 'title' => lang('Naxas.RestaurantOps::default.navigation.reports'), 'href' => route('naxas.restaurantops.reports.index'), 'permission' => 'Restaurant.Reports.BranchSales'],
+                ],
+            ],
+        ];
+    }
+}
