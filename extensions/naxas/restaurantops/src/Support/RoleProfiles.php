@@ -62,7 +62,9 @@ final class RoleProfiles
             'cashier' => self::PROFILES['cashier'] + ['permissions' => [
                 'Restaurant.Operations.Access', 'Restaurant.LocationContext.Access', 'Restaurant.POS.Access',
                 'Restaurant.POS.Order.Create', 'Restaurant.POS.Order.Edit', 'Restaurant.POS.Order.Hold', 'Restaurant.POS.Order.Recall',
-                'Restaurant.POS.Discount.Apply', 'Restaurant.POS.Void.Request', 'Restaurant.POS.Payment.Settle', 'Restaurant.POS.Receipt.Reprint',
+                'Restaurant.POS.Discount.Apply', 'Restaurant.POS.Void.Request',
+                'Restaurant.POS.Payment.Create', 'Restaurant.POS.Payment.View', 'Restaurant.POS.Payment.ReprintReceipt',
+                'Restaurant.POS.Payment.Settle', 'Restaurant.POS.Receipt.Reprint',
                 'Restaurant.Shifts.Access', 'Restaurant.Shifts.Open', 'Restaurant.Shifts.CashMovement.Create', 'Restaurant.Shifts.Close', 'Restaurant.Shifts.ViewOwn',
                 'Restaurant.Tables.View', 'Restaurant.Tables.Open', 'Restaurant.Tables.BillRequest', 'Restaurant.Tables.Close',
             ], 'optional_permissions' => ['Admin.Dashboard', 'Admin.Orders']],

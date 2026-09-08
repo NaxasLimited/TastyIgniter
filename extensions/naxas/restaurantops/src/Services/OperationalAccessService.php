@@ -17,7 +17,7 @@ final class OperationalAccessService
         }
 
         if (! $user->hasPermission($permission)) {
-            return ['operational_permission_denied', 'You are not authorized to access this operational feature.', 403];
+            return ['operational_permission_denied', 'Missing permission: '.$permission.'.', 403];
         }
 
         if ($transactional && $this->context->isGlobal()) {

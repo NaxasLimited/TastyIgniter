@@ -371,8 +371,13 @@
             },
             body: body ? JSON.stringify(body) : null,
         });
-        const payload = await response.json();
-        if (!response.ok) throw new Error(payload.error?.message || 'Request failed.');
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            const message = payload.error?.message || (response.status === 403
+                ? 'Missing POS permission. Ask an admin to allow this action for your role.'
+                : 'Request failed.');
+            throw new Error(message);
+        }
         return payload.data;
     };
     const renderOrder = order => {
@@ -481,9 +486,15 @@
         updateServiceBadges();
     };
     const serviceCustomerText = order => order.guest_name || order.guest_phone || (Number(order.guest_count || 0) > 0 ? order.guest_count + ' guest(s)' : 'Walk-in');
+    const setModalOpen = (modal, open) => {
+        if (!open && modal.contains(document.activeElement)) {
+            document.activeElement.blur();
+        }
+        modal.classList.toggle('is-open', open);
+        modal.setAttribute('aria-hidden', open ? 'false' : 'true');
+    };
     const closeServiceOrders = () => {
-        serviceOrdersModal.classList.remove('is-open');
-        serviceOrdersModal.setAttribute('aria-hidden', 'true');
+        setModalOpen(serviceOrdersModal, false);
     };
     const serviceOrderCard = order => {
         const status = String(order.status || '').replaceAll('_', ' ');
@@ -513,8 +524,7 @@
         serviceOrdersList.innerHTML = rows.length
             ? rows.map(serviceOrderCard).join('')
             : '<div class="rops-muted text-center py-5">No ' + serviceText(serviceType).toLowerCase() + ' orders waiting.</div>';
-        serviceOrdersModal.classList.add('is-open');
-        serviceOrdersModal.setAttribute('aria-hidden', 'false');
+        setModalOpen(serviceOrdersModal, true);
     };
     const renderService = () => {
         serviceLabel.textContent = serviceText(selectedService);
@@ -528,12 +538,10 @@
     };
     const openServiceModal = () => {
         renderService();
-        serviceModal.classList.add('is-open');
-        serviceModal.setAttribute('aria-hidden', 'false');
+        setModalOpen(serviceModal, true);
     };
     const closeServiceModal = () => {
-        serviceModal.classList.remove('is-open');
-        serviceModal.setAttribute('aria-hidden', 'true');
+        setModalOpen(serviceModal, false);
     };
     const selectService = value => {
         if (currentOrder && currentOrder.items && currentOrder.items.length) {
@@ -591,30 +599,24 @@
             return;
         }
         renderTableChoices();
-        tableModal.classList.add('is-open');
-        tableModal.setAttribute('aria-hidden', 'false');
+        setModalOpen(tableModal, true);
     };
     const closeTableModal = () => {
-        tableModal.classList.remove('is-open');
-        tableModal.setAttribute('aria-hidden', 'true');
+        setModalOpen(tableModal, false);
     };
     const openWaiterModal = () => {
         renderWaiterChoices();
-        waiterModal.classList.add('is-open');
-        waiterModal.setAttribute('aria-hidden', 'false');
+        setModalOpen(waiterModal, true);
     };
     const closeWaiterModal = () => {
-        waiterModal.classList.remove('is-open');
-        waiterModal.setAttribute('aria-hidden', 'true');
+        setModalOpen(waiterModal, false);
     };
     const openGuestsModal = () => {
         guestsValue.textContent = selectedGuestCount;
-        guestsModal.classList.add('is-open');
-        guestsModal.setAttribute('aria-hidden', 'false');
+        setModalOpen(guestsModal, true);
     };
     const closeGuestsModal = () => {
-        guestsModal.classList.remove('is-open');
-        guestsModal.setAttribute('aria-hidden', 'true');
+        setModalOpen(guestsModal, false);
     };
     const setGuestCount = count => {
         selectedGuestCount = Math.max(1, Math.min(99, Number(count || 1)));
@@ -659,14 +661,12 @@
         setCustomerStep(currentPhone || currentName ? 'summary' : 'entry');
         customerSummaryName.textContent = currentName || 'Guest customer';
         customerSummaryPhone.textContent = currentPhone ? '+880' + currentPhone : '';
-        customerModal.classList.add('is-open');
-        customerModal.setAttribute('aria-hidden', 'false');
+        setModalOpen(customerModal, true);
         setTimeout(() => (customerEntry.hidden ? customerNext : customerPhone).focus(), 50);
         customerNext.classList.toggle('is-ready', customerPhone.value.trim().length > 0);
     };
     const closeCustomerModal = () => {
-        customerModal.classList.remove('is-open');
-        customerModal.setAttribute('aria-hidden', 'true');
+        setModalOpen(customerModal, false);
     };
     const normalizedCustomerPhone = () => {
         const local = customerPhone.value.replace(/[^\d]/g, '').replace(/^0+/, '');
@@ -844,8 +844,7 @@
     };
 
     const closeOptions = () => {
-        optionModal.classList.remove('is-open');
-        optionModal.setAttribute('aria-hidden', 'true');
+        setModalOpen(optionModal, false);
         activeOptionTile = null;
         activeVariantId = null;
     };
@@ -902,8 +901,7 @@
                 <div class="rops-option-choices">${group.modifiers.map(modifier => optionControl(group, modifier)).join('')}</div>
             </section>
         `).join('');
-        optionModal.classList.add('is-open');
-        optionModal.setAttribute('aria-hidden', 'false');
+        setModalOpen(optionModal, true);
         return true;
     };
 
